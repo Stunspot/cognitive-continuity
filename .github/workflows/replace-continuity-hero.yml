@@ -1,0 +1,76 @@
+name: Replace Cognitive Continuity hero artwork
+
+on:
+  push:
+    paths:
+      - .github/workflows/replace-continuity-hero.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate a non-anatomical continuity composition
+        run: |
+          python -m pip install --quiet --upgrade gradio_client pillow
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from PIL import Image, ImageOps, ImageFilter
+          from gradio_client import Client
+          import shutil
+
+          prompt = (
+              "Wide 16:9 text-free premium editorial abstract artwork, a deep midnight-blue gallery of many "
+              "thin translucent glass strata and vellum-like planes suspended at different depths, one delicate "
+              "luminous cyan fiber weaving continuously through selected planes and linking small geometric source "
+              "nodes, a clear branching revision path, a few warm coral conflict markers, several obsolete planes "
+              "fading away, and one precise clean empty gap representing deliberate removal, spacious left side, "
+              "elegant archival atmosphere, crisp geometry, subtle volumetric depth, refined and calm, entirely "
+              "non-biological and non-anatomical, no brain, no head, no body, no neurons, no neural tissue, no organic "
+              "organ shapes, no people, no faces, no logos, no words, no letters, no screens, no dashboards, no "
+              "database cylinder, no filing cabinet, no flat icon scene"
+          )
+          result = Client("black-forest-labs/FLUX.1-schnell", verbose=True).predict(
+              prompt, 271828, False, 1536, 864, 4, api_name="/infer"
+          )
+          candidate = result[0] if isinstance(result, (tuple, list)) else result
+          if isinstance(candidate, dict):
+              candidate = candidate.get("path") or candidate.get("url") or candidate.get("name")
+          if not isinstance(candidate, str):
+              raise SystemExit(f"Unsupported image result: {candidate!r}")
+          working = Path('/tmp/continuity-replacement')
+          if candidate.startswith(('http://', 'https://')):
+              working.write_bytes(urlopen(Request(candidate, headers={'User-Agent':'Mozilla/5.0'}), timeout=120).read())
+          else:
+              source = Path(candidate)
+              if not source.exists():
+                  raise SystemExit(f"Returned image path does not exist: {candidate}")
+              shutil.copyfile(source, working)
+          image = Image.open(working).convert('RGB')
+          image = ImageOps.fit(image, (1600, 900), method=Image.Resampling.LANCZOS)
+          image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=55, threshold=3))
+          output = Path('docs/assets/cognitive-continuity-hero.png')
+          output.parent.mkdir(parents=True, exist_ok=True)
+          image.save(output, format='PNG', optimize=True)
+          check = Image.open(output)
+          if check.format != 'PNG' or check.size != (1600, 900) or output.stat().st_size < 100_000:
+              raise SystemExit(f"Raster verification failed: {check.format} {check.size} {output.stat().st_size}")
+          print(f"Verified replacement: {output.stat().st_size} bytes")
+          PY
+      - name: Commit replacement and remove this one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/cognitive-continuity-hero.png
+          git rm .github/workflows/replace-continuity-hero.yml
+          git commit -m "Replace Cognitive Continuity hero with non-anatomical artwork"
+          git push
