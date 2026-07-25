@@ -1,0 +1,48 @@
+name: Check artwork replacement run
+
+on:
+  push:
+    paths:
+      - .github/workflows/check-replacement-run.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  check:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read recent workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/actions/runs?per_page=30',
+              headers={
+                  'Accept': 'application/vnd.github+json',
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'continuity-run-check',
+              },
+          )
+          data = json.load(urllib.request.urlopen(req, timeout=30))
+          rows = []
+          for run in data.get('workflow_runs', []):
+              if run.get('name') == 'Replace Cognitive Continuity hero artwork':
+                  rows.append({k: run.get(k) for k in ['id','name','status','conclusion','event','head_sha','html_url','created_at','updated_at']})
+          open('.github/replacement-run-status.json','w',encoding='utf-8').write(json.dumps(rows, indent=2))
+          PY
+      - name: Commit status and remove checker
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/replacement-run-status.json
+          git rm .github/workflows/check-replacement-run.yml
+          git commit -m "chore: record artwork replacement run status"
+          git push
