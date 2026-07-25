@@ -1,0 +1,90 @@
+2026-07-25T16:03:43.9286487Z [36;1mimport shutil[0m
+2026-07-25T16:03:43.9286911Z [36;1m[0m
+2026-07-25T16:03:43.9287283Z [36;1mprompt = ([0m
+2026-07-25T16:03:43.9288099Z [36;1m    "Wide 16:9 text-free premium editorial abstract artwork, a deep midnight-blue gallery of many "[0m
+2026-07-25T16:03:43.9289448Z [36;1m    "thin translucent glass strata and vellum-like planes suspended at different depths, one delicate "[0m
+2026-07-25T16:03:43.9290892Z [36;1m    "luminous cyan fiber weaving continuously through selected planes and linking small geometric source "[0m
+2026-07-25T16:03:43.9292306Z [36;1m    "nodes, a clear branching revision path, a few warm coral conflict markers, several obsolete planes "[0m
+2026-07-25T16:03:43.9293625Z [36;1m    "fading away, and one precise clean empty gap representing deliberate removal, spacious left side, "[0m
+2026-07-25T16:03:43.9295849Z [36;1m    "elegant archival atmosphere, crisp geometry, subtle volumetric depth, refined and calm, entirely "[0m
+2026-07-25T16:03:43.9297229Z [36;1m    "non-biological and non-anatomical, no brain, no head, no body, no neurons, no neural tissue, no organic "[0m
+2026-07-25T16:03:43.9298526Z [36;1m    "organ shapes, no people, no faces, no logos, no words, no letters, no screens, no dashboards, no "[0m
+2026-07-25T16:03:43.9299584Z [36;1m    "database cylinder, no filing cabinet, no flat icon scene"[0m
+2026-07-25T16:03:43.9300248Z [36;1m)[0m
+2026-07-25T16:03:43.9300899Z [36;1mresult = Client("black-forest-labs/FLUX.1-schnell", verbose=True).predict([0m
+2026-07-25T16:03:43.9301799Z [36;1m    prompt, 271828, False, 1536, 864, 4, api_name="/infer"[0m
+2026-07-25T16:03:43.9302417Z [36;1m)[0m
+2026-07-25T16:03:43.9303019Z [36;1mcandidate = result[0] if isinstance(result, (tuple, list)) else result[0m
+2026-07-25T16:03:43.9303779Z [36;1mif isinstance(candidate, dict):[0m
+2026-07-25T16:03:43.9304811Z [36;1m    candidate = candidate.get("path") or candidate.get("url") or candidate.get("name")[0m
+2026-07-25T16:03:43.9305688Z [36;1mif not isinstance(candidate, str):[0m
+2026-07-25T16:03:43.9413404Z [36;1m    raise SystemExit(f"Unsupported image result: {candidate!r}")[0m
+2026-07-25T16:03:43.9414084Z [36;1mworking = Path('/tmp/continuity-replacement')[0m
+2026-07-25T16:03:43.9415192Z [36;1mif candidate.startswith(('http://', 'https://')):[0m
+2026-07-25T16:03:43.9417172Z [36;1m    working.write_bytes(urlopen(Request(candidate, headers={'User-Agent':'Mozilla/5.0'}), timeout=120).read())[0m
+2026-07-25T16:03:43.9418002Z [36;1melse:[0m
+2026-07-25T16:03:43.9418273Z [36;1m    source = Path(candidate)[0m
+2026-07-25T16:03:43.9418806Z [36;1m    if not source.exists():[0m
+2026-07-25T16:03:43.9419260Z [36;1m        raise SystemExit(f"Returned image path does not exist: {candidate}")[0m
+2026-07-25T16:03:43.9419747Z [36;1m    shutil.copyfile(source, working)[0m
+2026-07-25T16:03:43.9420126Z [36;1mimage = Image.open(working).convert('RGB')[0m
+2026-07-25T16:03:43.9420607Z [36;1mimage = ImageOps.fit(image, (1600, 900), method=Image.Resampling.LANCZOS)[0m
+2026-07-25T16:03:43.9421229Z [36;1mimage = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=55, threshold=3))[0m
+2026-07-25T16:03:43.9421836Z [36;1moutput = Path('docs/assets/cognitive-continuity-hero.png')[0m
+2026-07-25T16:03:43.9422323Z [36;1moutput.parent.mkdir(parents=True, exist_ok=True)[0m
+2026-07-25T16:03:43.9422801Z [36;1mimage.save(output, format='PNG', optimize=True)[0m
+2026-07-25T16:03:43.9423546Z [36;1mcheck = Image.open(output)[0m
+2026-07-25T16:03:43.9424055Z [36;1mif check.format != 'PNG' or check.size != (1600, 900) or output.stat().st_size < 100_000:[0m
+2026-07-25T16:03:43.9425233Z [36;1m    raise SystemExit(f"Raster verification failed: {check.format} {check.size} {output.stat().st_size}")[0m
+2026-07-25T16:03:43.9425907Z [36;1mprint(f"Verified replacement: {output.stat().st_size} bytes")[0m
+2026-07-25T16:03:43.9426315Z [36;1mPY[0m
+2026-07-25T16:03:43.9515454Z shell: /usr/bin/bash -e {0}
+2026-07-25T16:03:43.9515984Z env:
+2026-07-25T16:03:43.9516470Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-07-25T16:03:43.9516998Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib/pkgconfig
+2026-07-25T16:03:43.9517487Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-07-25T16:03:43.9517970Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-07-25T16:03:43.9518406Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.13/x64
+2026-07-25T16:03:43.9518861Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.13/x64/lib
+2026-07-25T16:03:43.9519240Z ##[endgroup]
+2026-07-25T16:03:50.6887949Z Traceback (most recent call last):
+2026-07-25T16:03:50.6889042Z Loaded as API: https://black-forest-labs-flux-1-schnell.hf.space
+2026-07-25T16:03:50.6898320Z   File "<stdin>", line 18, in <module>
+2026-07-25T16:03:50.6899495Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/gradio_client/client.py", line 499, in predict
+2026-07-25T16:03:50.6900445Z     ).result()
+2026-07-25T16:03:50.6901003Z       ^^^^^^^^
+2026-07-25T16:03:50.6902388Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/gradio_client/client.py", line 1484, in result
+2026-07-25T16:03:50.6903525Z     return super().result(timeout=timeout)
+2026-07-25T16:03:50.6903919Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-25T16:03:50.6904900Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+2026-07-25T16:03:50.6905534Z     return self.__get_result()
+2026-07-25T16:03:50.6910781Z            ^^^^^^^^^^^^^^^^^^^
+2026-07-25T16:03:50.6911891Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+2026-07-25T16:03:50.6912995Z     raise self._exception
+2026-07-25T16:03:50.6913984Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+2026-07-25T16:03:50.6915122Z     result = self.fn(*self.args, **self.kwargs)
+2026-07-25T16:03:50.6915516Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-25T16:03:50.6916197Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/gradio_client/client.py", line 1080, in _inner
+2026-07-25T16:03:50.6916827Z     predictions = _predict(*data, **kwargs)
+2026-07-25T16:03:50.6917574Z                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-25T16:03:50.6918230Z   File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/gradio_client/client.py", line 1200, in _predict
+2026-07-25T16:03:50.6918878Z     raise AppError(message=message, **result)
+2026-07-25T16:03:50.6919843Z gradio_client.exceptions.AppError: You have exceeded your ZeroGPU quota (90s requested vs. 85s left). Try again in 7:29:33. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens
+2026-07-25T16:03:50.8023295Z ##[error]Process completed with exit code 1.
+2026-07-25T16:03:50.8195889Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-25T16:03:50.8197231Z Post job cleanup.
+2026-07-25T16:03:50.9078664Z [command]/usr/bin/git version
+2026-07-25T16:03:50.9125429Z git version 2.54.0
+2026-07-25T16:03:50.9169067Z Temporarily overriding HOME='/home/runner/work/_temp/d0a2eefd-94cc-4c34-9dc2-ec675e3a1f3f' before making global git config changes
+2026-07-25T16:03:50.9170925Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-25T16:03:50.9175398Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/cognitive-continuity/cognitive-continuity
+2026-07-25T16:03:50.9222766Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-25T16:03:50.9269167Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-25T16:03:50.9540816Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-25T16:03:50.9581689Z http.https://github.com/.extraheader
+2026-07-25T16:03:50.9591825Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-07-25T16:03:50.9631476Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-25T16:03:50.9902515Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-25T16:03:50.9950440Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-25T16:03:51.0349812Z Cleaning up orphan processes
+2026-07-25T16:03:51.0626050Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
