@@ -9,7 +9,7 @@ No remote release, publication, installation, host discovery, invocation, persis
 The synchronized skill payload is derived byte-for-byte from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
-- commit: `d3216ce27e19e755566a1e01cb4f34566be5b990`
+- commit: `4a0054435ec67d3febb69b7719909bff69ef26fa`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
 The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
@@ -20,6 +20,7 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 - Requires the registry-selected active source, human authority, a nonsecret grant ID, exact selector-registry and normalized-destination hashes, environment corroboration, an absent same-parent sibling, and no overlap with any active capability selector.
 - Revalidates the grant before and after publication and removes a candidate if the selector registry or destination identity changes, while preserving v1 byte-for-byte.
 - Keeps migration selector-neutral: candidate qualification and any live selector switch remain separately authorized operations.
+- Derives the selector-registry locator from NOVA_DATA_ROOT, eliminating private workstation path literals from the portable payload.
 
 ## 0.2.0 changes
 
@@ -33,4 +34,4 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 
 ## Local checkpoint evidence
 
-The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 47-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.
+The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 48-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.
