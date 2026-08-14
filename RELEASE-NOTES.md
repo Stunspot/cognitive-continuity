@@ -1,0 +1,27 @@
+# Cognitive Continuity 0.2.0
+
+Status: **local standalone derivative checkpoint; unpublished**.
+
+No remote release, publication, installation, host discovery, invocation, persistent-store health, or live runtime claim is made by this checkpoint.
+
+## Source custody
+
+The synchronized skill payload is derived byte-for-byte from:
+
+- repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
+- commit: `a678d72049f99e999ccd4278ef9596adc0a0743e`
+- subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
+
+The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+
+## 0.2.0 changes
+
+- Adds Worldline as a read-only project-continuity service with distinct Resume, Status, Checkpoint, and Inspect views. A Worldline view is never a canonical write or persistence receipt.
+- Adds Faultline as a cue-gated, zero-to-three-card Error Neighborhood over governed v2 failure evidence. Cards advise within recorded authority; they do not route, authorize, diagnose, repair, retry, or promote procedures.
+- Adds the v2 immutable-generation runtime, transaction, validation, export, forgetting-plan, migration, and schema surfaces.
+- Preserves exact v1 read-only compatibility. Mutations require copy migration into a separate v2 workspace, and Faultline returns typed unsupported on v1.
+- Keeps portable fallback explicit: source-linked, unpersisted, and without a save claim.
+
+## Local checkpoint evidence
+
+The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 45-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.

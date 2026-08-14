@@ -1,0 +1,42 @@
+{
+  "format": "cognitive-continuity-standalone-release/v1",
+  "name": "cognitive-continuity",
+  "version": "0.2.0",
+  "release_status": "local_unpublished_checkpoint",
+  "derivative_status": "exact_integrated_subtree_sync",
+  "source": {
+    "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",
+    "commit": "a678d72049f99e999ccd4278ef9596adc0a0743e",
+    "subtree": "plugins/augment-of-mind/skills/cognitive-continuity"
+  },
+  "synchronized_paths": [
+    "SKILL.md",
+    "adapters/",
+    "agents/",
+    "assets/",
+    "examples/",
+    "fallbacks/",
+    "personas/",
+    "references/",
+    "scripts/"
+  ],
+  "standalone_custody": [
+    ".git/",
+    ".github/",
+    "LICENSE.md",
+    "docs/",
+    "README.md",
+    "RELEASE-NOTES.md",
+    "release-manifest.json"
+  ],
+  "boundaries": {
+    "worldline": "read_only_view_no_canonical_writes",
+    "faultline": "bounded_v2_error_neighborhood_no_control_authority",
+    "v1": "read_only_compatibility_copy_migration_required_for_mutation"
+  },
+  "publication": {
+    "remote_action_performed": false,
+    "published": false,
+    "installed": false
+  }
+}

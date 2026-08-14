@@ -8,14 +8,21 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository contains the curated contest skill shipped with MIND, copied from the public **Nova + MIND OpenAI Build Week** release into a fresh standalone history. Private development history is excluded.
+This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.0` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
 
-- Contest edition: `1.0.0`
+- Standalone derivative: `0.2.0`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Contest source: [Cognitive Continuity in Nova + MIND](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/e42dd11646bc548b9ac29d6f700370365ee68986/plugins/augment-of-mind/skills/cognitive-continuity)
+- Integrated source: [Cognitive Continuity at `a678d72049f99e999ccd4278ef9596adc0a0743e`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/a678d72049f99e999ccd4278ef9596adc0a0743e/plugins/augment-of-mind/skills/cognitive-continuity)
+- Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
 
-This is a clean standalone source link. Independent plugin installation is not claimed by the contest evidence.
+## 0.2.0 service and compatibility boundaries
+
+- **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
+- **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.
+- **Continuity v1 is read-only through the v2 surface.** Worldline may inspect and explicitly degrade a v1 workspace, but mutation is rejected until an exact copy migration creates a distinct v2 workspace. Faultline is typed unsupported on v1; the source workspace is never upgraded in place.
+
+These are package-level and local deterministic boundaries. Keep package presence, installation, host discovery, invocation, persistent-store health, and live external behavior as separate evidence states.
 
 ## Operative modes
 
