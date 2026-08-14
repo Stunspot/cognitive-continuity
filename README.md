@@ -8,15 +8,15 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.1` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
+This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.2` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
 
-- Standalone derivative: `0.2.1`
+- Standalone derivative: `0.2.2`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Integrated source: [Cognitive Continuity at `a44272b092d111b6e37c26ee03e9a52471b536b6`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/a44272b092d111b6e37c26ee03e9a52471b536b6/plugins/augment-of-mind/skills/cognitive-continuity)
+- Integrated source: [Cognitive Continuity at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
 - Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
 
-## 0.2.1 service and compatibility boundaries
+## 0.2.2 service and compatibility boundaries
 
 - **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
 - **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.

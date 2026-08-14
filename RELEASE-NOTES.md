@@ -1,4 +1,4 @@
-# Cognitive Continuity 0.2.1
+# Cognitive Continuity 0.2.2
 
 Status: **local standalone derivative checkpoint; unpublished**.
 
@@ -9,10 +9,19 @@ No remote release, publication, installation, host discovery, invocation, persis
 The synchronized skill payload is derived byte-for-byte from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
-- commit: `a44272b092d111b6e37c26ee03e9a52471b536b6`
+- commit: `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
 The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+
+## 0.2.2 changes
+
+- Resolves Worldline project identity before retrieval from explicit current task or handoff authority, then one governed mission or pursuit, then maintained project mapping, with the working directory only as an unopposed fallback.
+- Stops same-tier project disagreement as `project_scope_ambiguous`; selectors continue to locate stores rather than choose projects.
+- Withholds globally scoped goals, commitments, phases, statuses, blockers, and next actions from specific-project operative fields and resumption pointers.
+- Reports `project_scope_unrepresented` when no eligible exact-project state exists instead of manufacturing continuity from global operational state.
+- Preserves the original eligibility reason for inaccessible global records and adds adversarial exact-versus-global, global-only, and ineligible-global regression coverage.
+- Keeps workspace schema v2, capability-owned custody, migration, Faultline, correction, forgetting, and receipt contracts unchanged.
 
 ## 0.2.1 changes
 
@@ -36,4 +45,4 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 
 ## Local checkpoint evidence
 
-The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 48-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.
+The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 51-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.
