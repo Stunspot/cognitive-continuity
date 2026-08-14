@@ -8,20 +8,21 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.0` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
+This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.1` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
 
-- Standalone derivative: `0.2.0`
+- Standalone derivative: `0.2.1`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Integrated source: [Cognitive Continuity at `48065e1594289f023aee9264582f2cafb31ae602`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/48065e1594289f023aee9264582f2cafb31ae602/plugins/augment-of-mind/skills/cognitive-continuity)
+- Integrated source: [Cognitive Continuity at `d3216ce27e19e755566a1e01cb4f34566be5b990`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/d3216ce27e19e755566a1e01cb4f34566be5b990/plugins/augment-of-mind/skills/cognitive-continuity)
 - Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
 
-## 0.2.0 service and compatibility boundaries
+## 0.2.1 service and compatibility boundaries
 
 - **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
 - **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.
 - **Continuity v1 is read-only through the v2 surface.** Worldline may inspect and explicitly degrade a v1 workspace, preserving valid legacy full-date eligibility as the equivalent UTC-midnight instant without changing source bytes. Mutation is rejected until an exact copy migration creates a distinct v2 workspace. Faultline is typed unsupported on v1; the source workspace is never upgraded in place.
 - **Copy migration preserves legacy time meaning.** A valid v1 full-date effective value is deterministically represented as UTC midnight in the distinct v2 successor. The authority- and source-hash-bound receipt records the normalization count and digest; v1 bytes remain unchanged.
+- **Nova successor migration is exact and selector-neutral.** The guarded mode accepts only the active Continuity source and a hash-bound absent sibling under the same Nova custody parent. It revalidates registry, environment, capability boundaries, and destination identity before and after publication, while leaving selector mutation to a separate live operation.
 
 These are package-level and local deterministic boundaries. Keep package presence, installation, host discovery, invocation, persistent-store health, and live external behavior as separate evidence states.
 
