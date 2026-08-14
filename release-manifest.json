@@ -6,7 +6,7 @@
   "derivative_status": "exact_integrated_subtree_sync",
   "source": {
     "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",
-    "commit": "1bbaa1645cd8830179f6f9eb2b779941c62c35c0",
+    "commit": "550da0734566d97f69c5b6a85fa4dc88a6c0eb20",
     "subtree": "plugins/augment-of-mind/skills/cognitive-continuity"
   },
   "synchronized_paths": [
@@ -33,7 +33,8 @@
     "worldline": "read_only_view_no_canonical_writes",
     "faultline": "bounded_v2_error_neighborhood_no_control_authority",
     "recovery": "human_authority_v2_reconcile_v1_guidance_only",
-    "v1": "read_only_compatibility_copy_migration_required_for_mutation"
+    "v1": "read_only_compatibility_copy_migration_required_for_mutation",
+    "migration_temporal_normalization": "legacy_full_date_to_equivalent_utc_midnight_with_count_and_digest"
   },
   "publication": {
     "remote_action_performed": false,
