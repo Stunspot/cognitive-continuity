@@ -13,7 +13,7 @@ This repository is the standalone derivative of Cognitive Continuity shipped wit
 - Standalone derivative: `0.2.1`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Integrated source: [Cognitive Continuity at `4a0054435ec67d3febb69b7719909bff69ef26fa`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/4a0054435ec67d3febb69b7719909bff69ef26fa/plugins/augment-of-mind/skills/cognitive-continuity)
+- Integrated source: [Cognitive Continuity at `a44272b092d111b6e37c26ee03e9a52471b536b6`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/a44272b092d111b6e37c26ee03e9a52471b536b6/plugins/augment-of-mind/skills/cognitive-continuity)
 - Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
 
 ## 0.2.1 service and compatibility boundaries
@@ -23,6 +23,7 @@ This repository is the standalone derivative of Cognitive Continuity shipped wit
 - **Continuity v1 is read-only through the v2 surface.** Worldline may inspect and explicitly degrade a v1 workspace, preserving valid legacy full-date eligibility as the equivalent UTC-midnight instant without changing source bytes. Mutation is rejected until an exact copy migration creates a distinct v2 workspace. Faultline is typed unsupported on v1; the source workspace is never upgraded in place.
 - **Copy migration preserves legacy time meaning.** A valid v1 full-date effective value is deterministically represented as UTC midnight in the distinct v2 successor. The authority- and source-hash-bound receipt records the normalization count and digest; v1 bytes remain unchanged.
 - **Nova successor migration is exact and selector-neutral.** The guarded mode accepts only the active Continuity source and a hash-bound absent sibling under the same Nova custody parent. It revalidates registry, environment, capability boundaries, and destination identity before and after publication, while leaving selector mutation to a separate live operation.
+- **Oversized v1 episodes migrate losslessly, not permissively.** The sole migration-only provenance extension preserves bounded historical content exactly, keeps ordinary v2 writes capped at 1,000 characters, binds generation 0 and every later transition to committed receipts, protects the retained history required for validation, and rejects forged, altered, or relabeled provenance histories.
 
 These are package-level and local deterministic boundaries. Keep package presence, installation, host discovery, invocation, persistent-store health, and live external behavior as separate evidence states.
 

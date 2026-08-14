@@ -9,7 +9,7 @@ No remote release, publication, installation, host discovery, invocation, persis
 The synchronized skill payload is derived byte-for-byte from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
-- commit: `4a0054435ec67d3febb69b7719909bff69ef26fa`
+- commit: `a44272b092d111b6e37c26ee03e9a52471b536b6`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
 The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
@@ -21,6 +21,8 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 - Revalidates the grant before and after publication and removes a candidate if the selector registry or destination identity changes, while preserving v1 byte-for-byte.
 - Keeps migration selector-neutral: candidate qualification and any live selector switch remain separately authorized operations.
 - Derives the selector-registry locator from NOVA_DATA_ROOT, eliminating private workstation path literals from the portable payload.
+- Preserves bounded v1 episode content above the ordinary v2 limit without truncation through migration-only provenance tied to generation 0, the migration receipt, and each retained generation receipt.
+- Keeps ordinary v2 writes capped, rejects forged or relabeled provenance histories, and protects the retained generation chain required to validate governed forgetting and exact restoration.
 
 ## 0.2.0 changes
 
