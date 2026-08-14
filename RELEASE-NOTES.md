@@ -9,7 +9,7 @@ No remote release, publication, installation, host discovery, invocation, persis
 The synchronized skill payload is derived byte-for-byte from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
-- commit: `a678d72049f99e999ccd4278ef9596adc0a0743e`
+- commit: `1bbaa1645cd8830179f6f9eb2b779941c62c35c0`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
 The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
@@ -19,6 +19,7 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 - Adds Worldline as a read-only project-continuity service with distinct Resume, Status, Checkpoint, and Inspect views. A Worldline view is never a canonical write or persistence receipt.
 - Adds Faultline as a cue-gated, zero-to-three-card Error Neighborhood over governed v2 failure evidence. Cards advise within recorded authority; they do not route, authorize, diagnose, repair, retry, or promote procedures.
 - Adds the v2 immutable-generation runtime, transaction, validation, export, forgetting-plan, migration, and schema surfaces.
+- Exposes the public `continuity_store_v2.py recover` command. It requires human authority, revalidates a selected v2 workspace under lock, reports `clean` or reconciles provable pending transactions as `recovered`, and returns guidance only without mutation for v1.
 - Preserves exact v1 read-only compatibility. Mutations require copy migration into a separate v2 workspace, and Faultline returns typed unsupported on v1.
 - Keeps portable fallback explicit: source-linked, unpersisted, and without a save claim.
 

@@ -13,7 +13,7 @@ This repository is the standalone derivative of Cognitive Continuity shipped wit
 - Standalone derivative: `0.2.0`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Integrated source: [Cognitive Continuity at `a678d72049f99e999ccd4278ef9596adc0a0743e`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/a678d72049f99e999ccd4278ef9596adc0a0743e/plugins/augment-of-mind/skills/cognitive-continuity)
+- Integrated source: [Cognitive Continuity at `1bbaa1645cd8830179f6f9eb2b779941c62c35c0`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/1bbaa1645cd8830179f6f9eb2b779941c62c35c0/plugins/augment-of-mind/skills/cognitive-continuity)
 - Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
 
 ## 0.2.0 service and compatibility boundaries
