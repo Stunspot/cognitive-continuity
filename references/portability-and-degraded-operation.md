@@ -14,6 +14,14 @@ Validate structure before reading content as continuity. Map source scopes to de
 
 Copy migration requires explicit authority, the exact v1 source tree digest, and a new absent destination. It never rewrites or selects the source. A valid legacy full-date temporal value (`YYYY-MM-DD`) means UTC midnight under the v1 runtime, so the v2 successor records the equivalent `YYYY-MM-DDT00:00:00Z` value. The migration receipt binds the normalization count and transformation digest. A v1 episode whose content exceeds the ordinary 1,000-character v2 write limit may be copied losslessly only through `legacy_content_provenance`: the exact content, original-row/content SHA-256 links, character count, and UTF-8 byte count are bound to generation 0, the migration manifest, and its receipt. Migrated legacy content is capped at 16,384 characters and 65,536 UTF-8 bytes; larger or otherwise successor-incompatible rows fail closed with a content-free disposition digest. Ordinary v2 writes remain capped at 1,000 characters, and later transactions cannot mint or alter legacy provenance. The retained generation chain is protected while this provenance contract exists because validation replays governed removal and exact restoration across adjacent generations. These digests are integrity links inside the governed workspace, not authentication against a filesystem writer.
 
+## Qualify mutation independently from reading
+
+Reading a selected, valid workspace does not prove that its filesystem can safely host a transaction. Report `read` and `mutation` independently. Continuity v1 is read-only through the v2 interface regardless of filesystem qualification; v2 mutation additionally requires a qualified adapter.
+
+The qualified adapters are local fixed-volume NTFS on Windows and local writable APFS/HFS on Darwin. Darwin qualification reads `statfs` mount flags and filesystem identity directly; network/nonlocal, read-only, unrecognized, and known cloud-synchronized paths fail closed. The Darwin transaction path uses `fcntl.flock`, `fsync`, an `F_FULLFSYNC` request where the filesystem supports it, same-directory manifest-last `rename`, and parent-directory `fsync`. A commit receipt distinguishes `F_FULLFSYNC` from the typed `fsync` fallback. This is a tested local-filesystem assurance boundary, not a claim about cloud replication, remote mounts, backup completion, or physical-media survival.
+
+Preserve and revalidate the lexical path before resolving it. Resolution must not erase a symlink, reparse, broken-link, or alias witness that changes custody identity.
+
 ## Report the destination assurance envelope
 
 Distinguish:

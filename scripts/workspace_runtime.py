@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -25,7 +26,7 @@ from eligibility_policy import contains_secret_data
 LEGACY_FORMAT = "cd-cognitive-continuity/v1"
 FORMAT = "cd-cognitive-continuity/v2"
 EXPORT_FORMAT = "cd-cognitive-continuity-export/v2"
-IMPLEMENTATION_VERSION = "0.2.2"
+IMPLEMENTATION_VERSION = "0.2.3"
 SELECTOR = "NOVA_CONTINUITY_HOME"
 ROOT_SELECTOR = "NOVA_DATA_ROOT"
 
@@ -70,6 +71,7 @@ class NovaMigrationGrant:
     custody_root: str
     ambient_root: str
     destination_root: str
+    destination_lexical: str
     destination_sha256: str
 
 class ContinuityError(RuntimeError):
@@ -110,9 +112,31 @@ def tree_digest(root: Path) -> str:
         digest.update(relative.encode("utf-8") + b"\0" + bytes.fromhex(sha256_file(path)))
     return digest.hexdigest()
 
+# Darwin <sys/fcntl.h> defines F_FULLFSYNC as command 51.
+_F_FULLFSYNC = 51
+
+
+def _darwin_full_fsync(descriptor: int, fcntl_module: Any | None = None) -> bool:
+    """Request Darwin's device-cache flush; return False when the filesystem declines it."""
+    if fcntl_module is None:
+        import fcntl as fcntl_module
+    while True:
+        try:
+            fcntl_module.fcntl(descriptor, _F_FULLFSYNC)
+            return True
+        except OSError as exc:
+            if exc.errno == errno.EINTR:
+                continue
+            if exc.errno in {errno.EINVAL, errno.ENOTSUP, errno.ENOSYS}:
+                return False
+            raise
+
+
 def _flush(handle: Any) -> None:
     handle.flush()
     os.fsync(handle.fileno())
+    if sys.platform == "darwin":
+        _darwin_full_fsync(handle.fileno())
 
 def _fsync_directory(path: Path) -> None:
     if os.name == "nt":
@@ -274,14 +298,18 @@ def _inside(root: Path, path: Path) -> Path:
         return resolved.relative_to(root.resolve())
     except ValueError as exc:
         raise ContinuityError("Path escapes workspace custody", "custody_denied") from exc
-def _absolute_local(value: Any, label: str) -> Path:
+def _absolute_lexical(value: Any, label: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ContinuityError(f"{label} is missing", "selector_registry_invalid")
     raw = value.strip()
     candidate = Path(raw)
     if not candidate.is_absolute() or any(part in {".", ".."} for part in candidate.parts) or raw.startswith("\\\\?\\") or raw.startswith("\\\\.\\"):
         raise ContinuityError(f"{label} is not an absolute supported local path", "selector_registry_invalid")
-    return candidate.resolve()
+    return Path(os.path.abspath(raw))
+
+
+def _absolute_local(value: Any, label: str) -> Path:
+    return _absolute_lexical(value, label).resolve()
 
 def _has_reparse_component(path: Path, boundary: Path | None = None) -> bool:
     current = path
@@ -293,6 +321,9 @@ def _has_reparse_component(path: Path, boundary: Path | None = None) -> bool:
             break
         current = current.parent
     for item in reversed(candidates):
+        # A broken symlink does not exist(), but it is still an indirect edge.
+        if item.is_symlink():
+            return True
         if not item.exists():
             continue
         try:
@@ -300,9 +331,39 @@ def _has_reparse_component(path: Path, boundary: Path | None = None) -> bool:
         except OSError:
             return True
         attributes = getattr(info, "st_file_attributes", 0)
-        if item.is_symlink() or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+        if attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
             return True
     return False
+
+
+def _existing_identity(path: Path) -> tuple[Path, tuple[str, ...]]:
+    """Return the nearest existing ancestor and exact unresolved suffix."""
+    current = Path(os.path.abspath(str(path)))
+    suffix: list[str] = []
+    while not current.exists() and current.parent != current:
+        suffix.append(current.name)
+        current = current.parent
+    return current, tuple(reversed(suffix))
+
+
+def _same_path_identity(left: Path, right: Path) -> bool:
+    """Compare existing identities, retaining exact names for absent descendants."""
+    left_anchor, left_suffix = _existing_identity(left)
+    right_anchor, right_suffix = _existing_identity(right)
+    if left_suffix != right_suffix:
+        return False
+    try:
+        return os.path.samefile(left_anchor, right_anchor)
+    except (FileNotFoundError, OSError):
+        return os.path.normcase(str(left_anchor.resolve())) == os.path.normcase(str(right_anchor.resolve()))
+
+
+def _verify_lexical_identity(root: Path, lexical_root: Path) -> None:
+    lexical = Path(os.path.abspath(str(lexical_root)))
+    if _has_reparse_component(lexical):
+        raise ContinuityError("Workspace path crosses an unexamined symlink or reparse edge", "custody_reparse_escape")
+    if not _same_path_identity(root, lexical):
+        raise ContinuityError("Workspace lexical and resolved identities disagree", "selector_registry_changed")
 
 def _registry(path: Path | None = None) -> tuple[Path, dict[str, Any], str]:
     registry_path = (path or SELECTOR_REGISTRY).resolve()
@@ -329,10 +390,12 @@ def _within(root: Path, target: Path, code: str = "caller_root_denied") -> None:
 def _nova_registry_values(registry_path: Path | None = None) -> tuple[Path, Path, Path, dict[str, Any], str]:
     path, registry, digest = _registry(registry_path)
     active = registry["active_values"]
-    root = _absolute_local(active.get(ROOT_SELECTOR), ROOT_SELECTOR)
-    continuity = _absolute_local(active.get(SELECTOR), SELECTOR)
+    root_lexical = _absolute_lexical(active.get(ROOT_SELECTOR), ROOT_SELECTOR)
+    continuity_lexical = _absolute_lexical(active.get(SELECTOR), SELECTOR)
+    root = root_lexical.resolve()
+    continuity = continuity_lexical.resolve()
     _within(root, continuity, "selector_registry_invalid")
-    if not root.exists() or _has_reparse_component(root) or _has_reparse_component(continuity, root):
+    if not root.exists() or _has_reparse_component(root_lexical) or _has_reparse_component(continuity_lexical, root_lexical):
         raise ContinuityError("Trusted Nova custody path crosses an unrecorded reparse edge", "custody_reparse_escape")
     return path, root, continuity, registry, digest
 
@@ -352,11 +415,11 @@ def select_workspace(
     if normalized_mode == "generic_explicit":
         if not path_value:
             raise ContinuityError("Generic mode requires an explicit workspace", "selector_missing")
-        selected_lexical = Path(os.path.abspath(str(path_value).strip()))
+        selected_lexical = _absolute_lexical(path_value, "workspace")
         selected = _absolute_local(path_value, "workspace")
         if ".codex" in {part.casefold() for part in selected.parts}:
             raise ContinuityError("Host .codex custody is a protected target", "protected_target_denied")
-        if _has_reparse_component(selected):
+        if _has_reparse_component(selected_lexical):
             raise ContinuityError("Explicit workspace crosses an unexamined reparse edge", "custody_reparse_escape")
         return selected, ResolutionToken(mode="generic_explicit", selected_root=str(selected), selected_lexical=str(selected_lexical), provenance="generic_explicit")
     if normalized_mode not in {"nova_ambient", "nova_explicit_authorized"}:
@@ -387,14 +450,14 @@ def select_workspace(
             raise ContinuityError("Authorized explicit mode requires a workspace path", "selector_missing")
         if not grant_id or not str(grant_id).strip():
             raise ContinuityError("Authorized explicit Nova selection requires a recorded grant ID", "authority_denied")
-        selected_lexical = Path(os.path.abspath(str(path_value).strip()))
+        selected_lexical = _absolute_lexical(path_value, "workspace")
         selected = _absolute_local(path_value, "workspace")
         _within(custody_root, selected, "caller_root_denied")
         provenance = f"nova_explicit_authorized:{grant_id}:{digest[:16]}"
     _within(custody_root, selected, "caller_root_denied")
     if ".codex" in {part.casefold() for part in selected.parts}:
         raise ContinuityError("Nova Continuity cannot use host .codex custody", "protected_target_denied")
-    if _has_reparse_component(selected, custody_root):
+    if _has_reparse_component(selected_lexical, custody_root):
         raise ContinuityError("Selected Nova workspace crosses a reparse edge", "custody_reparse_escape")
     if not selected.exists():
         raise ContinuityError("Selected Nova workspace does not exist", "workspace_missing")
@@ -419,11 +482,11 @@ def revalidate_resolution(token: ResolutionToken, root: Path) -> None:
     lexical = Path(token.selected_lexical)
     if _has_reparse_component(lexical):
         raise ContinuityError("Selected workspace crossed a late reparse edge", "custody_reparse_escape")
-    if os.path.normcase(str(lexical.resolve())) != os.path.normcase(str(root.resolve())):
+    if not _same_path_identity(lexical, root):
         raise ContinuityError("Selected workspace path changed after resolution", "selector_registry_changed")
-    if os.path.normcase(str(root.resolve())) != os.path.normcase(str(Path(token.selected_root).resolve())):
+    if not _same_path_identity(root, Path(token.selected_root)):
         raise ContinuityError("Resolved workspace differs from its selection token", "selector_registry_changed")
-    _filesystem_adapter(root)
+    _filesystem_adapter(root, lexical_root=lexical)
     if token.mode == "generic_explicit":
         return
     if not token.registry_path or not token.registry_digest or not token.custody_root or not token.ambient_root:
@@ -487,15 +550,78 @@ def workspace(
         registry_path=registry_path, grant_id=grant_id,
     )[0]
 
-def _filesystem_adapter(root: Path) -> str:
-    if os.name != "nt":
-        raise ContinuityError("Only qualified local Windows NTFS mutation is supported", "filesystem_semantics_unsupported")
+_DARWIN_MNT_RDONLY = 0x00000001
+_DARWIN_MNT_LOCAL = 0x00001000
+_DARWIN_LOCAL_FILESYSTEMS = {"apfs", "hfs"}
+
+
+class _DarwinFsid(ctypes.Structure):
+    _fields_ = [("value", ctypes.c_int32 * 2)]
+
+
+class _DarwinStatfs(ctypes.Structure):
+    # Darwin's 64-bit statfs layout from <sys/mount.h>.
+    _fields_ = [
+        ("f_bsize", ctypes.c_uint32),
+        ("f_iosize", ctypes.c_int32),
+        ("f_blocks", ctypes.c_uint64),
+        ("f_bfree", ctypes.c_uint64),
+        ("f_bavail", ctypes.c_uint64),
+        ("f_files", ctypes.c_uint64),
+        ("f_ffree", ctypes.c_uint64),
+        ("f_fsid", _DarwinFsid),
+        ("f_owner", ctypes.c_uint32),
+        ("f_type", ctypes.c_uint32),
+        ("f_flags", ctypes.c_uint32),
+        ("f_fssubtype", ctypes.c_uint32),
+        ("f_fstypename", ctypes.c_char * 16),
+        ("f_mntonname", ctypes.c_char * 1024),
+        ("f_mntfromname", ctypes.c_char * 1024),
+        ("f_flags_ext", ctypes.c_uint32),
+        ("f_reserved", ctypes.c_uint32 * 7),
+    ]
+
+
+def _darwin_text(value: Any) -> str:
+    return bytes(value).split(b"\0", 1)[0].decode("utf-8", errors="strict")
+
+
+def _darwin_filesystem_observation(probe: Path) -> dict[str, Any]:
+    descriptor = os.open(str(probe), os.O_RDONLY)
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        # The explicit 64-bit syscall matches _DarwinStatfs without header-time symbol rewriting.
+        fstatfs64 = libc.fstatfs64
+        fstatfs64.argtypes = [ctypes.c_int, ctypes.POINTER(_DarwinStatfs)]
+        fstatfs64.restype = ctypes.c_int
+        observed = _DarwinStatfs()
+        if fstatfs64(descriptor, ctypes.byref(observed)) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+    finally:
+        os.close(descriptor)
+    return {
+        "filesystem": _darwin_text(observed.f_fstypename),
+        "flags": int(observed.f_flags),
+        "mount_point": _darwin_text(observed.f_mntonname),
+        "mounted_from": _darwin_text(observed.f_mntfromname),
+    }
+
+
+def _nearest_existing(path: Path) -> Path:
+    probe = path.resolve()
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
+    if not probe.exists():
+        raise ContinuityError("Cannot resolve local filesystem semantics", "filesystem_semantics_unsupported")
+    return probe
+
+
+def _windows_filesystem_adapter(root: Path) -> str:
     raw = str(root)
     if raw.startswith("\\\\"):
         raise ContinuityError("UNC and network paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
-    probe = root.resolve()
-    while not probe.exists() and probe.parent != probe:
-        probe = probe.parent
+    probe = _nearest_existing(root)
     cloud_roots: list[Path] = []
     for name in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer", "Dropbox", "GoogleDrive", "iCloudDrive"):
         value = os.environ.get(name)
@@ -523,6 +649,80 @@ def _filesystem_adapter(root: Path) -> str:
     if filesystem.value.upper() != "NTFS":
         raise ContinuityError(f"Unsupported filesystem for v2 mutation: {filesystem.value}", "filesystem_semantics_unsupported")
     return "windows-LockFileEx-MoveFileExW-write-through-ntfs/v1"
+
+
+def _darwin_cloud_synchronized(root: Path) -> bool:
+    parts = {part.casefold() for part in root.parts}
+    if parts & {"cloudstorage", "mobile documents", "com~apple~clouddocs", "onedrive", "dropbox", "google drive", "icloud drive", "box"}:
+        return True
+    for name in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer", "Dropbox", "GoogleDrive", "iCloudDrive"):
+        value = os.environ.get(name)
+        if not value:
+            continue
+        try:
+            root.resolve().relative_to(Path(value).resolve())
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
+
+
+def _darwin_filesystem_adapter(root: Path, observer: Any | None = None) -> str:
+    if _darwin_cloud_synchronized(root):
+        raise ContinuityError("Cloud-synchronized paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
+    probe = _nearest_existing(root)
+    try:
+        observation = (observer or _darwin_filesystem_observation)(probe)
+        filesystem = str(observation["filesystem"]).casefold()
+        flags = int(observation["flags"])
+    except (AttributeError, KeyError, TypeError, ValueError, OSError, UnicodeError) as exc:
+        raise ContinuityError("Cannot inspect Darwin local filesystem semantics", "filesystem_semantics_unsupported") from exc
+    if not flags & _DARWIN_MNT_LOCAL:
+        raise ContinuityError("Network and nonlocal Darwin filesystems are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
+    if flags & _DARWIN_MNT_RDONLY:
+        raise ContinuityError("Read-only Darwin filesystems cannot support mutation", "filesystem_semantics_unsupported")
+    if filesystem not in _DARWIN_LOCAL_FILESYSTEMS:
+        raise ContinuityError(f"Unsupported Darwin filesystem for v2 mutation: {filesystem}", "filesystem_semantics_unsupported")
+    return f"darwin-fcntl-flock-fsync-F_FULLFSYNC-when-available-rename-parent-fsync-{filesystem}/v1"
+
+
+def _filesystem_adapter(
+    root: Path,
+    *,
+    lexical_root: Path | None = None,
+    platform_name: str | None = None,
+    darwin_observer: Any | None = None,
+) -> str:
+    _verify_lexical_identity(root, lexical_root or root)
+    observed_platform = platform_name or sys.platform
+    if observed_platform == "win32":
+        return _windows_filesystem_adapter(root)
+    if observed_platform == "darwin":
+        return _darwin_filesystem_adapter(root, darwin_observer)
+    raise ContinuityError(
+        "Only qualified local Windows NTFS or Darwin APFS/HFS mutation is supported",
+        "filesystem_semantics_unsupported",
+    )
+
+
+def mutation_filesystem_support(
+    root: Path,
+    *,
+    lexical_root: Path | None = None,
+    platform_name: str | None = None,
+    darwin_observer: Any | None = None,
+) -> dict[str, Any]:
+    """Report mutation qualification without changing workspace bytes."""
+    try:
+        adapter = _filesystem_adapter(
+            root,
+            lexical_root=lexical_root,
+            platform_name=platform_name,
+            darwin_observer=darwin_observer,
+        )
+    except ContinuityError as exc:
+        return {"status": "unsupported", "reason_code": exc.code}
+    return {"status": "qualified", "adapter": adapter}
 
 def _selector_custody_boundaries() -> list[Path]:
     """Return every active Nova custody boundary from one stable registry read."""
@@ -571,7 +771,7 @@ def validate_external_target(source_root: Path, value: str, label: str, *, must_
     for boundary in _selector_custody_boundaries():
         if _is_within(target, boundary):
             raise ContinuityError(f"{label} enters a protected Nova capability boundary", "protected_target_denied")
-    _filesystem_adapter(target)
+    _filesystem_adapter(target, lexical_root=lexical)
     if must_be_absent and target.exists():
         raise ContinuityError(f"{label} must be absent", "protected_target_denied")
     return target
@@ -649,7 +849,7 @@ def validate_nova_migration_destination(
     destination_sha256 = sha256_bytes(_path_identity(target).encode("utf-8"))
     if destination_sha256 != expected_destination:
         raise ContinuityError("Migration destination does not match the exact recorded grant", "authority_denied")
-    _filesystem_adapter(target)
+    _filesystem_adapter(target, lexical_root=lexical)
     if must_be_absent and target.exists():
         raise ContinuityError(f"{label} must be absent", "protected_target_denied")
     _, _, final_digest = _registry(registry_path)
@@ -662,6 +862,7 @@ def validate_nova_migration_destination(
         custody_root=str(custody_root),
         ambient_root=str(ambient),
         destination_root=str(target),
+        destination_lexical=str(lexical),
         destination_sha256=destination_sha256,
     )
 
@@ -689,7 +890,7 @@ def revalidate_nova_migration_grant(
         raise ContinuityError("Copy migration destination changed after authorization", "selector_registry_changed")
     if sha256_bytes(_path_identity(destination).encode("utf-8")) != token.destination_sha256:
         raise ContinuityError("Copy migration destination grant no longer matches", "selector_registry_changed")
-    if _has_reparse_component(source_root) or _has_reparse_component(destination):
+    if _has_reparse_component(source_root) or _has_reparse_component(Path(token.destination_lexical)):
         raise ContinuityError("Copy migration path crossed a reparse edge", "custody_reparse_escape")
     for selector_name, selected_raw in registry["active_values"].items():
         if selector_name == ROOT_SELECTOR:
@@ -699,7 +900,7 @@ def revalidate_nova_migration_grant(
         boundary = selected.parent if suffix or selector_name.endswith(("_STORE", "_DATABASE")) else selected
         if _is_within(destination, boundary) or _is_within(boundary, destination):
             raise ContinuityError("Copy migration destination now overlaps an active capability selector", "selector_registry_changed")
-    _filesystem_adapter(destination)
+    _filesystem_adapter(destination, lexical_root=Path(token.destination_lexical))
     if require_destination_absent and destination.exists():
         raise ContinuityError("Migration destination must remain absent until publication begins", "protected_target_denied")
 
@@ -1040,18 +1241,38 @@ def find_idempotent_receipt(root: Path, idempotency_key: str | None, digest: str
         duplicate["status"] = "duplicate_committed"
         return duplicate
     return None
-def _replace_manifest(source: Path, destination: Path) -> str:
+def _replace_manifest(
+    source: Path,
+    destination: Path,
+    *,
+    platform_name: str | None = None,
+    full_fsync_operation: Any | None = None,
+    replace_operation: Any | None = None,
+    directory_sync: Any | None = None,
+) -> str:
     if source.parent.resolve() != destination.parent.resolve():
         raise ContinuityError("Manifest commit must remain in one directory", "filesystem_semantics_unsupported")
-    if os.name == "nt":
+    observed_platform = platform_name or sys.platform
+    if observed_platform == "win32":
         MOVEFILE_REPLACE_EXISTING = 0x1
         MOVEFILE_WRITE_THROUGH = 0x8
         ok = ctypes.windll.kernel32.MoveFileExW(str(source), str(destination), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
         if not ok:
             raise ctypes.WinError(ctypes.windll.kernel32.GetLastError())
         return "windows-MoveFileExW-replace-write-through/v1"
-    os.replace(source, destination)
-    _fsync_directory(destination.parent)
+    full_fsync = False
+    if observed_platform == "darwin":
+        descriptor = os.open(str(source), os.O_RDWR)
+        try:
+            os.fsync(descriptor)
+            full_fsync = (full_fsync_operation or _darwin_full_fsync)(descriptor)
+        finally:
+            os.close(descriptor)
+    (replace_operation or os.replace)(source, destination)
+    (directory_sync or _fsync_directory)(destination.parent)
+    if observed_platform == "darwin":
+        strength = "F_FULLFSYNC" if full_fsync else "fsync-fallback"
+        return f"darwin-{strength}-rename-parent-fsync/v1"
     return "posix-rename-parent-fsync/v1"
 
 def _row_count(value: bytes) -> int:
@@ -1238,7 +1459,7 @@ class WorkspaceTransaction:
 
     def __enter__(self) -> "WorkspaceTransaction":
         # Complete every read-only preflight before acquiring a lock or creating evidence.
-        self.adapter = _filesystem_adapter(self.root)
+        self.adapter = _filesystem_adapter(self.root, lexical_root=Path(self.resolution_token.selected_lexical) if self.resolution_token else self.root)
         pre_manifest, _ = open_snapshot(self.root)
         observed_generation = int(pre_manifest["generation"])
         if self.expected_generation != observed_generation:
@@ -1708,7 +1929,7 @@ def initialize_workspace(
     if not path_value:
         raise ContinuityError("Initialization requires an explicit absent target", "protected_target_denied")
     root, selector = select_workspace(path_value, mode="generic_explicit")
-    _filesystem_adapter(root)
+    _filesystem_adapter(root, lexical_root=Path(selector.selected_lexical))
     if root.exists():
         raise ContinuityError(f"Initialization target must be absent: {root}", "protected_target_denied")
     root.mkdir(parents=True, exist_ok=False)

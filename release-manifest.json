@@ -1,15 +1,21 @@
 {
   "format": "cognitive-continuity-standalone-release/v1",
   "name": "cognitive-continuity",
-  "version": "0.2.2",
-  "release_status": "local_unpublished_checkpoint",
-  "derivative_status": "exact_integrated_subtree_sync",
-  "source": {
+  "version": "0.2.3",
+  "release_status": "canonical_successor_local_unpublished_checkpoint",
+  "custody_status": "canonical_standalone_successor_with_integrated_lineage_base",
+  "canonical_authority": {
+    "repository": "https://github.com/Stunspot/cognitive-continuity",
+    "release_line": "standalone",
+    "version": "0.2.3"
+  },
+  "lineage_base": {
     "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",
     "commit": "c48a25b0a1d510d075bc3a519bbc5fab1c6afa33",
-    "subtree": "plugins/augment-of-mind/skills/cognitive-continuity"
+    "subtree": "plugins/augment-of-mind/skills/cognitive-continuity",
+    "base_standalone_version": "0.2.2"
   },
-  "synchronized_paths": [
+  "lineage_synchronized_paths": [
     "SKILL.md",
     "adapters/",
     "agents/",
@@ -19,6 +25,15 @@
     "personas/",
     "references/",
     "scripts/"
+  ],
+  "canonical_successor_changed_paths": [
+    "scripts/workspace_runtime.py",
+    "scripts/continuity_store_v2.py",
+    "scripts/tests/test_workspace_portability.py",
+    "references/portability-and-degraded-operation.md",
+    "README.md",
+    "RELEASE-NOTES.md",
+    "release-manifest.json"
   ],
   "standalone_custody": [
     ".git/",
@@ -30,6 +45,10 @@
     "release-manifest.json"
   ],
   "boundaries": {
+    "filesystem_read": "stable_snapshot_read_independent_of_mutation_qualification",
+    "filesystem_mutation_windows": "local_fixed_ntfs_lockfileex_movefileex_write_through",
+    "filesystem_mutation_darwin": "local_writable_apfs_hfs_flock_fsync_fullfsync_when_available_manifest_last_rename_parent_fsync",
+    "lexical_identity": "unresolved_path_reparse_and_symlink_witness_preserved_before_mutation",
     "worldline": "read_only_view_no_canonical_writes",
     "worldline_project_scope": "caller_precedence_and_specific_project_global_operative_isolation",
     "faultline": "bounded_v2_error_neighborhood_no_control_authority",
@@ -38,6 +57,9 @@
     "migration_temporal_normalization": "legacy_full_date_to_equivalent_utc_midnight_with_count_and_digest",
     "guarded_nova_successor": "active_source_exact_sibling_hash_bound_selector_neutral",
     "legacy_oversize_content": "lossless_bounded_migration_only_generation_and_receipt_bound"
+  },
+  "consumer_adoption": {
+    "free_nova_2_1_3": "not_adopted_separate_governed_action_required"
   },
   "publication": {
     "remote_action_performed": false,

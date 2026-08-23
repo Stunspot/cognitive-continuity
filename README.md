@@ -8,15 +8,28 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the standalone derivative of Cognitive Continuity shipped with **Nova + MIND**. Version `0.2.2` is synchronized from one exact integrated source commit into a fresh standalone history; private development history is excluded.
+This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.3` succeeds the exact `0.2.2` integrated-subtree sync recorded as its lineage base; that integrated repository is no longer the continuing source authority for this standalone line. Private development history remains excluded.
 
-- Standalone derivative: `0.2.2`
+- Canonical standalone release: `0.2.3`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
-- Integrated source: [Cognitive Continuity at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
-- Derivative status: locally checkpointed and unpublished; this repository state does not claim a remote release, independent plugin installation, host discovery, invocation, persistence, or live runtime health.
+- Lineage base: [the exact `0.2.2` integrated subtree at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
+- Release status: canonical successor checkpoint, local and unpublished. Free Nova `2.1.3` remains an earlier consumer until a separate adoption; this state does not claim publication, installation, host discovery, invocation, persistence, or live runtime health.
 
-## 0.2.2 service and compatibility boundaries
+## 0.2.3 service and compatibility boundaries
+
+- **Read support and mutation qualification are separate claims.** A valid selected workspace may be inspected without qualifying its filesystem for writes. `continuity_store_v2.py open` reports stable-snapshot read support separately from workspace-format and filesystem mutation status; v1 remains mutation-ineligible even when its filesystem would qualify.
+- **Qualified mutation remains deliberately narrow.** Windows retains the local fixed-volume NTFS adapter. Darwin adds local writable APFS/HFS through `statfs`; nonlocal, read-only, unqualified, and known cloud-synchronized paths fail closed before mutation.
+- **Darwin uses the existing POSIX transaction path with a stronger flush request.** Writers use `fcntl.flock`; staged writes receive `fsync` and request `F_FULLFSYNC`; manifest-last publication requests `F_FULLFSYNC` again before same-directory `rename`, then `fsync`s the parent directory. The commit journal records whether `F_FULLFSYNC` succeeded or the typed `fsync` fallback was used.
+- **Lexical custody survives resolution.** Selector, initialization, migration, and transaction checks retain the caller's unresolved path long enough to reject symlink/reparse edges, including broken symlinks, and compare existing filesystem identity plus exact absent suffixes before mutation.
+
+Run the native Darwin durability smoke on an actual Mac with:
+
+```bash
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+```
+
+The smoke creates only a temporary workspace, performs an initialized v2 mutation, validates it, and requires the APFS adapter, `flock` path, qualified capability report, and an `F_FULLFSYNC` manifest-commit receipt.
 
 - **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
 - **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.

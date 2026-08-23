@@ -1,18 +1,33 @@
-# Cognitive Continuity 0.2.2
+# Cognitive Continuity 0.2.3
 
-Status: **local standalone derivative checkpoint; unpublished**.
+Status: **canonical standalone successor checkpoint; local and unpublished**.
 
 No remote release, publication, installation, host discovery, invocation, persistent-store health, or live runtime claim is made by this checkpoint.
 
-## Source custody
+## Canonical custody and lineage
 
-The synchronized skill payload is derived byte-for-byte from:
+The standalone `cognitive-continuity` repository is the canonical source authority for the `0.2.3` successor release. Its recorded lineage base is the exact `0.2.2` synchronized payload from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
 - commit: `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
-The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+The integrated commit is lineage evidence, not continuing source authority for the standalone line. The `0.2.2` synchronized set was `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Version `0.2.3` deliberately changes the canonical standalone runtime, focused tests, README, portability reference, and release metadata; it no longer claims byte-for-byte subtree parity. Free Nova `2.1.3` remains an earlier consumer until a separately governed adoption. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+
+## 0.2.3 changes
+
+- Adds a fail-closed Darwin adapter for local writable APFS/HFS volumes, while leaving the Windows local fixed-volume NTFS adapter and its receipt identity unchanged.
+- Uses the existing POSIX `fcntl.flock` writer lock and same-directory manifest-last `rename` path on Darwin, requests `F_FULLFSYNC` after `fsync` and immediately before manifest publication, then `fsync`s the parent directory.
+- Reports the observed manifest commit strength as Darwin `F_FULLFSYNC` or an explicit `fsync` fallback instead of silently treating them as identical guarantees.
+- Separates stable-snapshot read support from workspace-format and filesystem mutation qualification in the `open` capability report; v2 mutation operations stop claiming support on an unqualified host.
+- Preserves lexical path evidence through selector, initialization, migration, and transaction checks; rejects broken symlinks and lexical/resolved identity disagreement before mutation.
+- Adds Windows-runnable Darwin adapter and `F_FULLFSYNC` seam tests, an unchanged-Windows-adapter assertion, and a Darwin-only end-to-end APFS/`flock`/manifest-publication smoke surface.
+
+Native Darwin smoke command:
+
+```bash
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+```
 
 ## 0.2.2 changes
 
@@ -45,4 +60,4 @@ The intended synchronized set is `SKILL.md` plus `adapters/`, `agents/`, `assets
 
 ## Local checkpoint evidence
 
-The checkpoint gate covers exact parity for the 72-file synchronized payload, the combined 51-test suite, JSON parsing for all repository JSON files, Skill Creator `quick_validate.py`, generated-cache cleanup, and final diff inspection. This evidence is local and deterministic; it does not establish installed or live-host behavior.
+The Windows test gate ran 61 tests in 177.552 seconds: 59 passed, the native Darwin smoke skipped on the non-Darwin host, and the real broken-symlink creation check skipped because this Windows token lacks symlink privilege; the controlled lexical-edge test passed. JSON parsing, generated-cache cleanup, and final diff inspection remain part of the local gate. Windows seam evidence does not establish native Darwin behavior; the Darwin smoke command above remains the explicit live-host gate. This checkpoint does not establish publication, installation, host discovery, consumer adoption, or persistent-store health.

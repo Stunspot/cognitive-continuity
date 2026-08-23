@@ -49,6 +49,7 @@ from workspace_runtime import (
     revalidate_resolution,
     ResolutionToken,
     _has_reparse_component,
+    mutation_filesystem_support,
 )
 
 PACKAGE_VERSION = IMPLEMENTATION_VERSION
@@ -1499,11 +1500,30 @@ def cmd_recover(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def workspace_access_support(root: Path, selector: ResolutionToken, observed_format: str) -> dict[str, Any]:
+    filesystem = mutation_filesystem_support(root, lexical_root=Path(selector.selected_lexical))
+    read = {
+        "status": "supported",
+        "adapter": "stable-manifest-snapshot-read/v1",
+        "mutation_qualification_required": False,
+    }
+    if observed_format == LEGACY_FORMAT:
+        mutation = {
+            "status": "unsupported",
+            "reason_code": "migration_required_for_mutation",
+            "filesystem_qualification": filesystem,
+        }
+    else:
+        mutation = filesystem
+    return {"read": read, "mutation": mutation}
+
+
 def cmd_open(args: argparse.Namespace) -> dict[str, Any]:
-    root = workspace(args.workspace, writable=False)
+    root, selector = open_workspace(args.workspace, writable=False)
     before = tree_digest(root)
     manifest = read_json(root / "manifest.json")
     observed = manifest.get("format")
+    access_support = workspace_access_support(root, selector, observed)
     if observed == LEGACY_FORMAT:
         capabilities = {
             "open_read": "supported", "validate": "supported_with_known_limits", "context_compile": "supported_d07_policy",
@@ -1516,13 +1536,30 @@ def cmd_open(args: argparse.Namespace) -> dict[str, Any]:
         mode = "v1_read_only"
     else:
         capabilities = {name: "supported" for name in (
-            "open_read", "validate", "context_compile", "worldline_read_views", "error_neighborhood", "capture", "correct",
-            "fault_capture", "failure_pattern_governance", "export", "forget_plan", "forget_apply", "recover", "migrate_copy_from_v1",
+            "open_read", "validate", "context_compile", "worldline_read_views", "error_neighborhood", "forget_plan",
         )}
+        mutation_value = "supported" if access_support["mutation"]["status"] == "qualified" else access_support["mutation"]["reason_code"]
+        capabilities.update({name: mutation_value for name in (
+            "capture", "correct", "fault_capture", "failure_pattern_governance", "forget_apply", "recover",
+        )})
+        capabilities["export"] = "supported_with_qualified_destination"
+        capabilities["migrate_copy_from_v1"] = "supported_with_qualified_destination"
         mode = "v2_native"
     if tree_digest(root) != before:
         raise ContinuityError("Read-only open changed source bytes", "source_changed")
-    return {"format": "cd-continuity-open/v2", "workspace_format": observed, "manifest_identity": {"workspace_id": manifest.get("workspace_id"), "generation": manifest.get("generation"), "manifest_sha256": sha256_file(root / "manifest.json")}, "compatibility_mode": mode, "capabilities": capabilities, "source_mutated": False}
+    return {
+        "format": "cd-continuity-open/v2",
+        "workspace_format": observed,
+        "manifest_identity": {
+            "workspace_id": manifest.get("workspace_id"),
+            "generation": manifest.get("generation"),
+            "manifest_sha256": sha256_file(root / "manifest.json"),
+        },
+        "compatibility_mode": mode,
+        "access_support": access_support,
+        "capabilities": capabilities,
+        "source_mutated": False,
+    }
 
 def add_workspace_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
