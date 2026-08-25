@@ -546,7 +546,7 @@ class EligibilityTests(WorkspaceCase):
 class ExternalPathRoleTests(unittest.TestCase):
     def test_external_paths_are_qualified_by_operation_role(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             root = base / "workspace"
             root.mkdir()
             external = base / "input.json"

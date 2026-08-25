@@ -878,7 +878,7 @@ def _create_external_backup(root: Path, plan: dict[str, Any], output: Path, auth
                 "bytes": len(source_bytes),
             })
         with tempfile.TemporaryDirectory(prefix="continuity-restore-check-") as temporary:
-            check = Path(temporary) / "workspace"
+            check = Path(temporary).resolve() / "workspace"
             shutil.copytree(snapshot, check)
             restored_manifest, _ = open_snapshot(check)
             if restored_manifest.get("workspace_id") != manifest.get("workspace_id") or restored_manifest.get("generation") != manifest.get("generation"):
