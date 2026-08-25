@@ -8,28 +8,44 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.3` succeeds the exact `0.2.2` integrated-subtree sync recorded as its lineage base; that integrated repository is no longer the continuing source authority for this standalone line. Private development history remains excluded.
+This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.4` succeeds `0.2.3` and continues the standalone line rooted in the exact `0.2.2` integrated-subtree lineage base; that integrated repository is no longer the continuing source authority. Private development history remains excluded.
 
-- Canonical standalone release: `0.2.3`
+- Canonical standalone release: `0.2.4`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
 - Lineage base: [the exact `0.2.2` integrated subtree at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
-- Release status: canonical successor checkpoint, local and unpublished. Free Nova `2.1.3` remains an earlier consumer until a separate adoption; this state does not claim publication, installation, host discovery, invocation, persistence, or live runtime health.
+- Release status: canonical successor source checkpoint. Free Nova `2.1.3` remains an earlier consumer; consumer packaging, installation, host discovery, invocation, and persistent-store health remain separate evidence states.
 
-## 0.2.3 service and compatibility boundaries
+## 0.2.4 service and compatibility boundaries
 
 - **Read support and mutation qualification are separate claims.** A valid selected workspace may be inspected without qualifying its filesystem for writes. `continuity_store_v2.py open` reports stable-snapshot read support separately from workspace-format and filesystem mutation status; v1 remains mutation-ineligible even when its filesystem would qualify.
-- **Qualified mutation remains deliberately narrow.** Windows retains the local fixed-volume NTFS adapter. Darwin adds local writable APFS/HFS through `statfs`; nonlocal, read-only, unqualified, and known cloud-synchronized paths fail closed before mutation.
-- **Darwin uses the existing POSIX transaction path with a stronger flush request.** Writers use `fcntl.flock`; staged writes receive `fsync` and request `F_FULLFSYNC`; manifest-last publication requests `F_FULLFSYNC` again before same-directory `rename`, then `fsync`s the parent directory. The commit journal records whether `F_FULLFSYNC` succeeded or the typed `fsync` fallback was used.
+- **Filesystem names are never positive admission tickets.** Windows, Darwin, and Linux choose an operating-system primitive adapter, reject observed hazards, and verify the required lock and durability operations where the host exposes them. An unfamiliar local filesystem is not rejected merely because its name was absent from a list; a documented hazard type such as memory-backed or remote storage may still fail closed.
+- **Windows qualifies writable fixed or removable volumes by Win32 semantics.** The adapter uses `LockFileEx`, file flushes, and `MoveFileExW` with replace and write-through. Read-only, remote, optical, RAM, unknown, and unresolved volumes fail closed. NTFS, ReFS, exFAT, and future filesystem labels follow the same policy.
+- **Darwin qualifies local writable volumes by mount flags and required POSIX primitives.** Writers use `fcntl.flock`; staged writes receive `fsync` and request `F_FULLFSYNC`; manifest-last publication requests `F_FULLFSYNC` again before same-directory `rename`, then `fsync`s the parent directory. APFS, HFS, and unfamiliar local filesystem names follow the same policy. Nonlocal, read-only, or primitive-deficient stores fail closed.
+- **Linux now has a native mutation adapter.** It inspects the opened directory's mount, rejects read-only, known remote/shared, memory-backed, and volatile OverlayFS hazards, then requires nonblocking `flock` and directory `fsync`. Transactions use the existing same-directory staged writes, file `fsync`, immutable-generation rename, manifest-last `os.replace`, and parent-directory `fsync`.
+- **Cloud branding is not filesystem evidence.** A folder named `Dropbox`, `OneDrive`, `Box`, or anything else is not rejected by spelling. When such a folder resides on a qualified local volume, the receipt establishes only the local transaction boundary; provider replication, conflict resolution, backup completion, multi-host locking, and physical-media survival remain outside the claim.
+- **Qualification is transaction-bound.** The permanent lock must be a direct regular file. Disposable probes exercise regular-file locking, file flush, same-directory replacement, parent persistence, cleanup, and the permanent workspace lock. Windows volume serial, Darwin fsid/mount identity, or Linux mount ID/device is bound across the workspace root and every critical directory, then rechecked after locking, before intent, before generation publication, and before manifest replacement. An identity change stops automatic mutation until recovery requalifies the new boundary.
+- **Directory publication is explicit.** Initialization and copy migration build a complete qualified sibling and publish it with one write-through directory move; transaction intent and generations use the same publication primitive. POSIX renames sync destination and source parents. Windows uses MoveFileExW(..., MOVEFILE_WRITE_THROUGH). Lifecycle quarantine syncs both sides of a move before advancing its journal.
 - **Lexical custody survives resolution.** Selector, initialization, migration, and transaction checks retain the caller's unresolved path long enough to reject symlink/reparse edges, including broken symlinks, and compare existing filesystem identity plus exact absent suffixes before mutation.
+- **The permanent lock comes before writable qualification.** A mutation first observes the existing direct lock and critical-directory identities without changing them, acquires that lock, and only then runs disposable capability probes or writes owner metadata. Read-only `open` never repairs lock state; it reports when a later transaction probe is still required.
+- **Interrupted external publication retains evidence.** Export, import, backup, compilation, and forget-plan outputs publish without overwriting an existing destination. If completion cannot be proved, the command returns `recovery_required` and names the exact construction, intent, staged, quarantined, or published path to preserve and retry.
+- **Lifecycle deletion is receipt-bound and fail-closed.** Named-custody and authenticated-backup deletion bind the authorized object identity and publish immutable intent, quarantined, and final phase records outside the target. An interrupted phase requires human disposition rather than trusting external phase files as automatic resume authority; a finalized transaction directory is deleted only as one whole lifecycle unit.
 
-Run the native Darwin durability smoke on an actual Mac with:
+Run the full runtime suite on Windows, macOS, or Linux with:
 
 ```bash
-python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+python -B -X utf8 -m unittest discover -s scripts/tests -p "test_*.py" -v
 ```
 
-The smoke creates only a temporary workspace, performs an initialized v2 mutation, validates it, and requires the APFS adapter, `flock` path, qualified capability report, and an `F_FULLFSYNC` manifest-commit receipt.
+The repository's public runtime matrix runs that command on all three operating systems. Focused native durability smokes are also available:
+
+```bash
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.WindowsLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.LinuxLiveSmokeTests -v
+```
+
+Each smoke creates a temporary v2 workspace, mutates it under the native lock, validates the immutable generation, checks the capability report, and verifies the platform's manifest-commit receipt. A temporary-host smoke establishes the transaction implementation on that host; it does not turn an ephemeral runner or synchronized replica into permanent storage.
 
 - **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
 - **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.

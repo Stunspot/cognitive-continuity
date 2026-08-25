@@ -15,7 +15,7 @@ from typing import Any
 from schema_validation import SchemaCatalog, SchemaError
 from eligibility_policy import contains_secret_data, evaluate as evaluate_policy, parse_time_strict
 from workspace_runtime import (
-    ContinuityError, IdempotentReplay, atomic_json, dump_canonical, find_idempotent_receipt,
+    ContinuityError, IdempotentReplay, atomic_new_json, dump_canonical, find_idempotent_receipt,
     new_id, read_json, read_jsonl, request_digest, transaction, utc_now,
     open_workspace, validate_external_target,
 )
@@ -989,7 +989,7 @@ def cmd_neighborhood(args: argparse.Namespace) -> dict[str, Any]:
             raise ContinuityError("Workspace changed during both read attempts", "snapshot_changed")
     if args.output:
         output = validate_external_target(root, args.output, "Error Neighborhood output", must_be_absent=True)
-        atomic_json(output, result)
+        atomic_new_json(output, result)
     return result
 
 def add_workspace(parser: argparse.ArgumentParser) -> None:
@@ -1076,6 +1076,13 @@ def main(argv: list[str] | None = None) -> int:
     except (ContinuityError, SchemaError) as exc:
         code = exc.code if isinstance(exc, ContinuityError) else "workspace_invalid"
         print(json.dumps({"status": "error", "error": code, "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return 2
+    except OSError as exc:
+        error = ContinuityError(
+            f"Native filesystem operation failed without a stronger classification: {exc}",
+            "filesystem_semantics_unsupported",
+        )
+        print(json.dumps({"status": "error", "error": error.code, "message": str(error)}, ensure_ascii=False), file=sys.stderr)
         return 2
 
 if __name__ == "__main__":

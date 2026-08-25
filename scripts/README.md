@@ -4,6 +4,24 @@ These local standard-library tools make record and view operations observable.
 They do not decide semantic truth, grant authority, or turn a derived view into
 saved state. Run from this directory or supply the full script path.
 
+## Runtime portability gate
+
+Run the complete deterministic suite from the repository root:
+
+```text
+python -B -X utf8 -m unittest discover -s scripts/tests -p "test_*.py" -v
+```
+
+The public workflow repeats it on Windows, macOS, and Linux. The focused native filesystem smokes are:
+
+```text
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.WindowsLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.LinuxLiveSmokeTests -v
+```
+
+Filesystem names are diagnostic only. Mutation qualification follows the operating-system primitive adapter, writable state, known topology hazards, direct permanent-lock identity, replacement/durability probes, and a transaction-bound volume or mount witness across every critical directory. A cloud-branded folder name alone is neither permission nor denial.
+
 ## Probe before choosing a major
 
 Open is read-only and reports the workspace format plus supported operations:
@@ -85,7 +103,21 @@ it never changes the live selector.
 python -B -X utf8 continuity_store_v2.py migrate-copy SOURCE DESTINATION --authority user-explicit --source-tree-sha256 SOURCE_SHA256 --destination-mode nova_guarded_successor --destination-grant-id GRANT_ID --expected-selector-registry-sha256 REGISTRY_SHA256 --expected-destination-path-sha256 DESTINATION_PATH_SHA256
 ```
 
-Migration preserves a v1 episode above the ordinary 1,000-character v2 write limit only by attaching `legacy_content_provenance`. Before selecting the candidate, inspect the migration manifest and receipt for identical `legacy_oversize_content_provenance_sha256` values and the expected count, then run `validate_continuity_v2.py`. The validator binds those rows to generation 0, replays every retained transition, and refuses later minting or alteration; prior generations remain protected while the contract exists. New v2 episode writes remain capped at 1,000 characters. Migrated exceptions are bounded to 16,384 characters and 65,536 UTF-8 bytes; no row is truncated.
+Migration preserves a v1 episode that exceeds the ordinary 1,000-character v2 write limit only by attaching `legacy_content_provenance`. Before selecting the candidate, inspect the migration manifest and receipt for identical `legacy_oversize_content_provenance_sha256` values and the expected count, then run `validate_continuity_v2.py`. The validator binds those rows to generation 0, replays every retained transition, and refuses later minting or alteration; prior generations remain protected while this contract exists. New v2 episode writes remain capped at 1,000 characters. Migrated exceptions are bounded to 16,384 characters and 65,536 UTF-8 bytes; no row is truncated.
+
+## Recover interrupted work
+
+Treat `recovery_required` as a custody stop, not a cleanup request. Preserve every exact path named by the error and do not edit, rename, combine, or delete its intent, construction, stage, quarantine, or published artifact. Retry the same command with the same source, destination, authority, receipt output, expected generation, and idempotency inputs. A matching completed operation returns its existing result instead of repeating the mutation.
+
+Recover interrupted workspace transactions under the permanent lock with:
+
+```text
+python -B -X utf8 continuity_store_v2.py recover WORKSPACE --authority user-explicit
+```
+
+External outputs use no-clobber publication. Import consumes and binds one exact source snapshot. Backup and migration build complete sibling directories before publication. Named-custody and backup deletion require a receipt path that neither contains the target nor sits inside it. They bind the direct filesystem identity of the authorized object and retain immutable intent and quarantined phase records next to the receipt. If either deletion is interrupted, preserve every phase and staged path and stop for human disposition; external phase files are never accepted as automatic resume authority. Use `continuity_store_v2.py COMMAND --help` for the complete `delete-named-custody` or `backup-destroy` authorization inputs.
+
+After a successful operation, preserve the final receipt and its phase evidence. For interrupted destructive lifecycle work, do not retry automatically or remove residue: the runtime returns `recovery_required` rather than guessing ownership or deleting another object.
 
 ## Legacy v1 examples
 

@@ -26,7 +26,7 @@ from eligibility_policy import contains_secret_data
 LEGACY_FORMAT = "cd-cognitive-continuity/v1"
 FORMAT = "cd-cognitive-continuity/v2"
 EXPORT_FORMAT = "cd-cognitive-continuity-export/v2"
-IMPLEMENTATION_VERSION = "0.2.3"
+IMPLEMENTATION_VERSION = "0.2.4"
 SELECTOR = "NOVA_CONTINUITY_HOME"
 ROOT_SELECTOR = "NOVA_DATA_ROOT"
 
@@ -99,15 +99,39 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    try:
+        value, _ = _read_direct_file_bytes(path, boundary=path.parent)
+    except OSError as exc:
+        raise ContinuityError(
+            f"Cannot hash one direct regular file: {path}",
+            "workspace_invalid",
+        ) from exc
+    return sha256_bytes(value)
+
 
 def tree_digest(root: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted((item for item in root.rglob("*") if item.is_file()), key=lambda p: p.as_posix()):
+    files: list[Path] = []
+    try:
+        items = list(root.rglob("*"))
+    except OSError as exc:
+        raise ContinuityError("Tree custody cannot be enumerated", "custody_denied") from exc
+    for item in items:
+        if _has_reparse_component(item, root):
+            raise ContinuityError(
+                f"Tree custody contains an indirect entry: {item}",
+                "custody_reparse_escape",
+            )
+        try:
+            metadata = os.stat(item, follow_symlinks=False)
+        except OSError as exc:
+            raise ContinuityError(
+                f"Tree custody entry identity is unavailable: {item}",
+                "custody_denied",
+            ) from exc
+        if stat.S_ISREG(metadata.st_mode):
+            files.append(item)
+    for path in sorted(files, key=lambda candidate: candidate.as_posix()):
         relative = path.relative_to(root).as_posix()
         digest.update(relative.encode("utf-8") + b"\0" + bytes.fromhex(sha256_file(path)))
     return digest.hexdigest()
@@ -147,6 +171,61 @@ def _fsync_directory(path: Path) -> None:
     finally:
         os.close(descriptor)
 
+def _exclusive_rename(source: Path, destination: Path) -> None:
+    if sys.platform == "win32":
+        movefile_write_through = 0x8
+        if not ctypes.windll.kernel32.MoveFileExW(str(source), str(destination), movefile_write_through):
+            raise ctypes.WinError(ctypes.windll.kernel32.GetLastError())
+        return
+
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        source_bytes = os.fsencode(source)
+        destination_bytes = os.fsencode(destination)
+        if sys.platform == "darwin":
+            operation = library.renamex_np
+            operation.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+            arguments = (source_bytes, destination_bytes, 0x00000004)  # RENAME_EXCL
+        elif sys.platform.startswith("linux"):
+            operation = library.renameat2
+            operation.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+            arguments = (-100, source_bytes, -100, destination_bytes, 1)  # AT_FDCWD, RENAME_NOREPLACE
+        else:
+            raise OSError(errno.ENOTSUP, "Atomic no-clobber rename is unavailable on this platform")
+        operation.restype = ctypes.c_int
+    except AttributeError as exc:
+        raise OSError(errno.ENOTSUP, "Atomic no-clobber rename primitive is unavailable") from exc
+    if operation(*arguments) != 0:
+        observed_errno = ctypes.get_errno()
+        raise OSError(observed_errno, os.strerror(observed_errno), str(destination))
+
+
+def _move_path_write_through(
+    source: str | Path,
+    destination: Path,
+    *,
+    replace_existing: bool,
+) -> None:
+    source_path = Path(source)
+    source_parent = source_path.parent
+    destination_parent = destination.parent
+    if replace_existing and sys.platform == "win32":
+        flags = 0x8 | 0x1
+        if not ctypes.windll.kernel32.MoveFileExW(str(source_path), str(destination), flags):
+            raise ctypes.WinError(ctypes.windll.kernel32.GetLastError())
+        return
+    if replace_existing:
+        os.replace(source_path, destination)
+    else:
+        _exclusive_rename(source_path, destination)
+    _fsync_directory(destination_parent)
+    if source_parent.resolve() != destination_parent.resolve():
+        _fsync_directory(source_parent)
+
+
+def _replace_file_write_through(source: str | Path, destination: Path) -> None:
+    _move_path_write_through(source, destination, replace_existing=True)
+
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent), text=True)
@@ -155,8 +234,7 @@ def atomic_json(path: Path, value: Any) -> None:
             json.dump(value, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             _flush(handle)
-        os.replace(temporary, path)
-        _fsync_directory(path.parent)
+        _replace_file_write_through(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -168,8 +246,7 @@ def atomic_bytes(path: Path, value: bytes) -> None:
         with os.fdopen(fd, "wb") as handle:
             handle.write(value)
             _flush(handle)
-        os.replace(temporary, path)
-        _fsync_directory(path.parent)
+        _replace_file_write_through(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -185,6 +262,63 @@ def _write_new(path: Path, value: bytes) -> None:
     finally:
         os.close(descriptor)
 
+def atomic_new_bytes(path: Path, value: bytes) -> tuple[int, int]:
+    """Publish a new external file without clobbering or unsafe error cleanup."""
+    if not path.parent.is_dir():
+        raise ContinuityError(
+            "External output requires an existing exact parent directory",
+            "protected_target_denied",
+        )
+    if os.path.lexists(path):
+        raise ContinuityError("External output target must remain absent", "protected_target_denied")
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    temporary_path = Path(temporary)
+    try:
+        opened = os.fstat(descriptor)
+        temporary_identity = (int(opened.st_dev), int(opened.st_ino))
+        if not stat.S_ISREG(opened.st_mode) or int(opened.st_ino) == 0:
+            raise OSError(errno.ENOTSUP, "External staging identity is unavailable")
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(value)
+            _flush(handle)
+    except BaseException as exc:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise ContinuityError(
+            f"External output staging failed; retained path: {temporary_path}",
+            "recovery_required",
+        ) from exc
+    if _file_identity(temporary_path) != temporary_identity:
+        raise ContinuityError(
+            f"External output staging identity changed; retained path: {temporary_path}",
+            "recovery_required",
+        )
+    try:
+        _move_path_write_through(temporary_path, path, replace_existing=False)
+    except OSError as exc:
+        retained = path if _file_identity(path) == temporary_identity else temporary_path
+        raise ContinuityError(
+            f"External output publication failed without unsafe cleanup; retained path: {retained}",
+            "recovery_required",
+        ) from exc
+    published_identity = _file_identity(path)
+    if published_identity != temporary_identity:
+        raise ContinuityError(
+            f"External output identity changed during publication; retained path: {path}",
+            "recovery_required",
+        )
+    return published_identity
+
+
+def atomic_new_json(path: Path, value: Any) -> tuple[int, int]:
+    encoded = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    return atomic_new_bytes(path, encoded)
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -198,25 +332,27 @@ def _loads(text: str) -> Any:
 
 def _read_json_path(path: Path) -> Any:
     try:
-        return _loads(path.read_text(encoding="utf-8-sig"))
+        value, _ = _read_direct_file_bytes(path, boundary=path.parent)
+        return _loads(value.decode("utf-8-sig"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ContinuityError(f"Cannot read valid JSON from {path}: {exc}", "workspace_invalid") from exc
+        raise ContinuityError(f"Cannot read valid direct JSON from {path}: {exc}", "workspace_invalid") from exc
+
 
 def _read_jsonl_path(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
+    if not os.path.lexists(path):
         return []
     rows: list[dict[str, Any]] = []
     try:
-        with path.open("r", encoding="utf-8-sig") as handle:
-            for line_no, line in enumerate(handle, 1):
-                if not line.strip():
-                    continue
-                value = _loads(line)
-                if not isinstance(value, dict):
-                    raise ValueError("row is not an object")
-                rows.append(value)
+        value, _ = _read_direct_file_bytes(path, boundary=path.parent)
+        for line_no, line in enumerate(value.decode("utf-8-sig").splitlines(), 1):
+            if not line.strip():
+                continue
+            item = _loads(line)
+            if not isinstance(item, dict):
+                raise ValueError("row is not an object")
+            rows.append(item)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ContinuityError(f"Cannot read valid JSONL from {path}: {exc}", "workspace_invalid") from exc
+        raise ContinuityError(f"Cannot read valid direct JSONL from {path}: {exc}", "workspace_invalid") from exc
     return rows
 
 def encode_jsonl(rows: Iterable[dict[str, Any]]) -> bytes:
@@ -230,50 +366,80 @@ def _logical_member(path: Path) -> tuple[Path, str] | None:
     return (path.parent.parent, member) if member else None
 
 def generation_path(root: Path, manifest: dict[str, Any]) -> Path:
-    relative = manifest.get("active_generation_path")
-    if not isinstance(relative, str):
+    relative_value = manifest.get("active_generation_path")
+    if not isinstance(relative_value, str):
         raise ContinuityError("Manifest lacks active generation path", "recovery_required")
-    candidate = (root / relative).resolve()
+    relative = Path(relative_value)
+    if (
+        relative.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or len(relative.parts) != 2
+        or relative.parts[0] != "generations"
+    ):
+        raise ContinuityError("Active generation path is not canonical", "custody_denied")
+    candidate = root / relative
+    if _has_reparse_component(candidate, root):
+        raise ContinuityError("Active generation crosses an indirect custody edge", "custody_reparse_escape")
     try:
-        candidate.relative_to(root.resolve())
-    except ValueError as exc:
-        raise ContinuityError("Active generation escapes workspace", "custody_denied") from exc
+        metadata = os.stat(candidate, follow_symlinks=False)
+    except OSError as exc:
+        raise ContinuityError("Active generation is unavailable", "recovery_required") from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ContinuityError("Active generation is not one direct directory", "custody_denied")
     return candidate
+
 
 def _verify_generation(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     bundle = generation_path(root, manifest)
     generation_file = bundle / "generation.json"
-    if not generation_file.is_file():
-        raise ContinuityError("Active generation metadata is missing", "recovery_required")
-    observed_digest = sha256_file(generation_file)
-    if observed_digest != manifest.get("active_generation_manifest_sha256"):
+    try:
+        generation_bytes, _ = _read_direct_file_bytes(generation_file, boundary=root)
+        metadata = _loads(generation_bytes.decode("utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ContinuityError("Active generation metadata is missing or indirect", "recovery_required") from exc
+    if sha256_bytes(generation_bytes) != manifest.get("active_generation_manifest_sha256"):
         raise ContinuityError("Active generation manifest digest mismatch", "recovery_required")
-    metadata = _read_json_path(generation_file)
     if metadata.get("format") != GENERATION_FORMAT or metadata.get("workspace_id") != manifest.get("workspace_id") or metadata.get("generation") != manifest.get("generation"):
         raise ContinuityError("Active generation identity mismatch", "recovery_required")
     members = metadata.get("members") or {}
     for name in MEMBERS:
         path = bundle / name
         expected = (members.get(name) or {}).get("sha256")
-        if not path.is_file() or not expected or sha256_file(path) != expected:
+        try:
+            member_bytes, _ = _read_direct_file_bytes(path, boundary=root)
+        except OSError as exc:
+            raise ContinuityError(
+                f"Active generation member is missing or indirect: {name}",
+                "recovery_required",
+            ) from exc
+        if not expected or sha256_bytes(member_bytes) != expected:
             raise ContinuityError(f"Active generation member is missing or corrupt: {name}", "recovery_required")
     return metadata
 
-def open_snapshot(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def open_snapshot_identity(root: Path) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Return one verified manifest snapshot and the digest of those exact bytes."""
     manifest_path = root / "manifest.json"
     for _ in range(2):
         try:
-            first = manifest_path.read_bytes()
-        except OSError as exc:
-            raise ContinuityError("Workspace manifest is unavailable", "workspace_missing") from exc
-        manifest = _loads(first.decode("utf-8-sig"))
+            first, first_identity = _read_direct_file_bytes(manifest_path, boundary=root)
+            manifest = _loads(first.decode("utf-8-sig"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise ContinuityError("Workspace manifest is unavailable, indirect, or invalid", "workspace_missing") from exc
         if manifest.get("format") != FORMAT:
             raise ContinuityError("Immutable snapshot requires v2", "version_unsupported")
         metadata = _verify_generation(root, manifest)
-        second = manifest_path.read_bytes()
-        if first == second:
-            return manifest, metadata
+        try:
+            second, second_identity = _read_direct_file_bytes(manifest_path, boundary=root)
+        except OSError as exc:
+            raise ContinuityError("Workspace manifest became unavailable or indirect", "snapshot_changed") from exc
+        if first == second and first_identity == second_identity:
+            return manifest, metadata, sha256_bytes(first)
     raise ContinuityError("Workspace changed during both read attempts", "snapshot_changed")
+
+
+def open_snapshot(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    manifest, metadata, _ = open_snapshot_identity(root)
+    return manifest, metadata
 
 def read_json(path: Path) -> Any:
     return _read_json_path(path)
@@ -366,16 +532,17 @@ def _verify_lexical_identity(root: Path, lexical_root: Path) -> None:
         raise ContinuityError("Workspace lexical and resolved identities disagree", "selector_registry_changed")
 
 def _registry(path: Path | None = None) -> tuple[Path, dict[str, Any], str]:
-    registry_path = (path or SELECTOR_REGISTRY).resolve()
-    if not registry_path.is_file() or registry_path.is_symlink() or _has_reparse_component(registry_path):
+    registry_lexical = Path(os.path.abspath(str(path or SELECTOR_REGISTRY)))
+    if _has_reparse_component(registry_lexical):
         raise ContinuityError("Trusted Nova selector registry is unavailable or indirect", "selector_registry_invalid")
     try:
-        first = registry_path.read_bytes()
+        first, first_identity = _read_direct_file_bytes(registry_lexical)
         value = _loads(first.decode("utf-8-sig"))
-        second = registry_path.read_bytes()
+        second, second_identity = _read_direct_file_bytes(registry_lexical)
+        registry_path = registry_lexical.resolve(strict=True)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ContinuityError(f"Trusted Nova selector registry is invalid: {exc}", "selector_registry_invalid") from exc
-    if first != second:
+    if first != second or first_identity != second_identity:
         raise ContinuityError("Trusted Nova selector registry changed during resolution", "selector_registry_changed")
     if not isinstance(value, dict) or value.get("format") != "nova-path-selectors/v1" or not isinstance(value.get("active_values"), dict):
         raise ContinuityError("Trusted Nova selector registry has an unsupported shape", "selector_registry_invalid")
@@ -486,7 +653,12 @@ def revalidate_resolution(token: ResolutionToken, root: Path) -> None:
         raise ContinuityError("Selected workspace path changed after resolution", "selector_registry_changed")
     if not _same_path_identity(root, Path(token.selected_root)):
         raise ContinuityError("Resolved workspace differs from its selection token", "selector_registry_changed")
-    _filesystem_adapter(root, lexical_root=lexical)
+    _filesystem_adapter(
+        root,
+        lexical_root=lexical,
+        workspace_root=True,
+        perform_capability_probe=False,
+    )
     if token.mode == "generic_explicit":
         return
     if not token.registry_path or not token.registry_digest or not token.custody_root or not token.ambient_root:
@@ -550,9 +722,36 @@ def workspace(
         registry_path=registry_path, grant_id=grant_id,
     )[0]
 
+_WINDOWS_FILE_READ_ONLY_VOLUME = 0x00080000
 _DARWIN_MNT_RDONLY = 0x00000001
 _DARWIN_MNT_LOCAL = 0x00001000
-_DARWIN_LOCAL_FILESYSTEMS = {"apfs", "hfs"}
+
+_LINUX_REMOTE_FILESYSTEMS = frozenset({
+    "9p",
+    "afs",
+    "ceph",
+    "cifs",
+    "davfs",
+    "fuse.gcsfuse",
+    "fuse.glusterfs",
+    "fuse.rclone",
+    "fuse.s3fs",
+    "fuse.sshfs",
+    "fuse.vmhgfs-fuse",
+    "gcsfuse",
+    "gfs2",
+    "glusterfs",
+    "lustre",
+    "ocfs2",
+    "nfs",
+    "nfs4",
+    "s3fs",
+    "smb3",
+    "sshfs",
+    "vboxsf",
+    "virtiofs",
+})
+_LINUX_EPHEMERAL_FILESYSTEMS = frozenset({"ramfs", "tmpfs"})
 
 
 class _DarwinFsid(ctypes.Structure):
@@ -603,6 +802,7 @@ def _darwin_filesystem_observation(probe: Path) -> dict[str, Any]:
     return {
         "filesystem": _darwin_text(observed.f_fstypename),
         "flags": int(observed.f_flags),
+        "fsid": tuple(int(value) for value in observed.f_fsid.value),
         "mount_point": _darwin_text(observed.f_mntonname),
         "mounted_from": _darwin_text(observed.f_mntfromname),
     }
@@ -613,77 +813,408 @@ def _nearest_existing(path: Path) -> Path:
     while not probe.exists() and probe.parent != probe:
         probe = probe.parent
     if not probe.exists():
-        raise ContinuityError("Cannot resolve local filesystem semantics", "filesystem_semantics_unsupported")
+        raise ContinuityError("Cannot resolve filesystem semantics", "filesystem_semantics_unsupported")
     return probe
 
 
-def _windows_filesystem_adapter(root: Path) -> str:
-    raw = str(root)
-    if raw.startswith("\\\\"):
-        raise ContinuityError("UNC and network paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
-    probe = _nearest_existing(root)
-    cloud_roots: list[Path] = []
-    for name in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer", "Dropbox", "GoogleDrive", "iCloudDrive"):
-        value = os.environ.get(name)
-        if value:
-            try:
-                cloud_roots.append(Path(value).resolve())
-            except OSError:
-                pass
-    for cloud_root in cloud_roots:
-        try:
-            root.resolve().relative_to(cloud_root)
-        except ValueError:
-            continue
-        raise ContinuityError("Cloud-synchronized paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
-    if any(part.casefold() in {"onedrive", "dropbox", "google drive", "icloud drive", "box"} for part in root.parts):
-        raise ContinuityError("Cloud-synchronized paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
+def _windows_filesystem_observation(probe: Path) -> dict[str, Any]:
     volume_path = ctypes.create_unicode_buffer(261)
     if not ctypes.windll.kernel32.GetVolumePathNameW(str(probe), volume_path, len(volume_path)):
-        raise ContinuityError("Cannot resolve local filesystem semantics", "filesystem_semantics_unsupported")
-    if ctypes.windll.kernel32.GetDriveTypeW(volume_path.value) != 3:
-        raise ContinuityError("Mapped, remote, removable, and unknown drives are unsupported", "filesystem_semantics_unsupported")
+        raise OSError(ctypes.windll.kernel32.GetLastError(), "GetVolumePathNameW failed")
     filesystem = ctypes.create_unicode_buffer(261)
-    if not ctypes.windll.kernel32.GetVolumeInformationW(volume_path.value, None, 0, None, None, None, filesystem, len(filesystem)):
-        raise ContinuityError("Cannot inspect local filesystem semantics", "filesystem_semantics_unsupported")
-    if filesystem.value.upper() != "NTFS":
-        raise ContinuityError(f"Unsupported filesystem for v2 mutation: {filesystem.value}", "filesystem_semantics_unsupported")
-    return "windows-LockFileEx-MoveFileExW-write-through-ntfs/v1"
+    serial = ctypes.c_uint32()
+    maximum_component_length = ctypes.c_uint32()
+    flags = ctypes.c_uint32()
+    if not ctypes.windll.kernel32.GetVolumeInformationW(
+        volume_path.value,
+        None,
+        0,
+        ctypes.byref(serial),
+        ctypes.byref(maximum_component_length),
+        ctypes.byref(flags),
+        filesystem,
+        len(filesystem),
+    ):
+        raise OSError(ctypes.windll.kernel32.GetLastError(), "GetVolumeInformationW failed")
+    return {
+        "filesystem": filesystem.value,
+        "flags": int(flags.value),
+        "drive_type": int(ctypes.windll.kernel32.GetDriveTypeW(volume_path.value)),
+        "volume_path": volume_path.value,
+        "volume_serial": int(serial.value),
+        "maximum_component_length": int(maximum_component_length.value),
+    }
 
 
-def _darwin_cloud_synchronized(root: Path) -> bool:
-    parts = {part.casefold() for part in root.parts}
-    if parts & {"cloudstorage", "mobile documents", "com~apple~clouddocs", "onedrive", "dropbox", "google drive", "icloud drive", "box"}:
-        return True
-    for name in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer", "Dropbox", "GoogleDrive", "iCloudDrive"):
-        value = os.environ.get(name)
-        if not value:
-            continue
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        lexical = os.lstat(path)
+    except OSError:
+        return None
+    if (
+        not stat.S_ISREG(lexical.st_mode)
+        or int(lexical.st_ino) == 0
+        or _has_reparse_component(path, path.parent)
+    ):
+        return None
+    return int(lexical.st_dev), int(lexical.st_ino)
+
+
+def _direct_regular_file_identity(lock_path: Path) -> tuple[int, int]:
+    identity = _file_identity(lock_path)
+    if identity is None:
+        raise OSError(
+            errno.ENOTSUP,
+            "Permanent Continuity lock must be one direct regular file with a stable identity",
+        )
+    return identity
+
+
+def _read_direct_file_bytes(
+    path: Path,
+    *,
+    boundary: Path | None = None,
+) -> tuple[bytes, tuple[int, int]]:
+    """Read one direct regular file while binding the opened and lexical identities."""
+    checked_boundary = boundary or path.parent
+    if _has_reparse_component(path, checked_boundary):
+        raise OSError(errno.ELOOP, "Direct file read crossed an indirect edge", str(path))
+    expected = _direct_regular_file_identity(path)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(path), flags)
+    try:
+        opened = os.fstat(descriptor)
+        opened_identity = (int(opened.st_dev), int(opened.st_ino))
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or int(opened.st_ino) == 0
+            or opened_identity != expected
+        ):
+            raise OSError(errno.ESTALE, "Direct file identity changed while opening", str(path))
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            value = handle.read()
+        if _file_identity(path) != expected:
+            raise OSError(errno.ESTALE, "Direct file identity changed while reading", str(path))
+        return value, expected
+    finally:
+        os.close(descriptor)
+
+
+def _probe_regular_file_lock(lock_path: Path) -> None:
+    lexical_device, lexical_inode = _direct_regular_file_identity(lock_path)
+    flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(lock_path), flags)
+    acquired = False
+    state: Any = None
+    try:
         try:
-            root.resolve().relative_to(Path(value).resolve())
-            return True
-        except (ValueError, OSError):
-            continue
-    return False
+            opened = os.fstat(descriptor)
+        except OSError as exc:
+            raise ContinuityError(
+                "Permanent Continuity lock identity cannot be inspected",
+                "filesystem_semantics_unsupported",
+            ) from exc
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or int(opened.st_dev) != lexical_device
+            or int(opened.st_ino) != lexical_inode
+        ):
+            raise OSError(errno.ESTALE, "Permanent Continuity lock identity changed while opening")
+        acquired, state = _try_os_lock(descriptor)
+        # An initially busy permanent lock already demonstrates exclusion. When this
+        # process acquires it, a second independently opened handle must be refused.
+        if acquired:
+            challenger = os.open(str(lock_path), flags)
+            challenger_acquired = False
+            challenger_state: Any = None
+            try:
+                challenger_opened = os.fstat(challenger)
+                if (
+                    not stat.S_ISREG(challenger_opened.st_mode)
+                    or int(challenger_opened.st_dev) != lexical_device
+                    or int(challenger_opened.st_ino) != lexical_inode
+                ):
+                    raise OSError(errno.ESTALE, "Permanent Continuity lock identity changed for exclusion check")
+                challenger_acquired, challenger_state = _try_os_lock(challenger)
+                if challenger_acquired:
+                    raise OSError(errno.EIO, "Filesystem lock primitive did not enforce exclusion")
+            finally:
+                if challenger_acquired:
+                    _unlock_os_lock(challenger, challenger_state)
+                os.close(challenger)
+        os.fsync(descriptor)
+    finally:
+        if acquired:
+            _unlock_os_lock(descriptor, state)
+        os.close(descriptor)
 
 
-def _darwin_filesystem_adapter(root: Path, observer: Any | None = None) -> str:
-    if _darwin_cloud_synchronized(root):
-        raise ContinuityError("Cloud-synchronized paths are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
+def _filesystem_capability_probe(
+    root: Path,
+    probe: Path,
+    replace_operation: Any,
+    *,
+    workspace_root: bool,
+) -> None:
+    if workspace_root and root.exists():
+        if not root.is_dir():
+            raise OSError(errno.ENOTDIR, "Continuity root is not a directory")
+        lock_path = root / "locks" / "workspace.lock"
+        _probe_regular_file_lock(lock_path)
+        capability_parent = lock_path.parent
+    elif root.is_dir():
+        capability_parent = root
+    else:
+        capability_parent = probe if probe.is_dir() else probe.parent
+    if not capability_parent.is_dir():
+        raise OSError(errno.ENOTDIR, "Capability probe parent is not a directory")
+
+    capability_root = capability_parent / f".cc-filesystem-probe-{uuid.uuid4().hex}"
+    try:
+        capability_root.mkdir(mode=0o700)
+        _fsync_directory(capability_parent)
+        lock_path = capability_root / "workspace.lock"
+        source = capability_root / "replace.source"
+        destination = capability_root / "replace.destination"
+        directory_source = capability_root / "directory.source"
+        occupied_directory = capability_root / "directory.occupied"
+        directory_destination = capability_root / "directory.destination"
+        _write_new(lock_path, b"\0")
+        directory_source.mkdir()
+        occupied_directory.mkdir()
+        _fsync_directory(capability_root)
+        _probe_regular_file_lock(lock_path)
+        try:
+            _exclusive_rename(directory_source, occupied_directory)
+        except OSError as exc:
+            if exc.errno not in {errno.EEXIST, errno.ENOTEMPTY}:
+                raise
+        else:
+            raise OSError(errno.EIO, "Exclusive directory rename replaced an existing destination")
+        occupied_directory.rmdir()
+        _exclusive_rename(directory_source, directory_destination)
+        _fsync_directory(capability_root)
+        if directory_source.exists() or not directory_destination.is_dir():
+            raise OSError(errno.EIO, "Exclusive directory publication verification failed")
+        directory_destination.rmdir()
+        _write_new(source, b"replacement")
+        _write_new(destination, b"previous")
+        replace_operation(source, destination)
+        _fsync_directory(capability_root)
+        if source.exists() or destination.read_bytes() != b"replacement":
+            raise OSError(errno.EIO, "Same-directory replacement verification failed")
+        destination.unlink()
+        lock_path.unlink()
+        _fsync_directory(capability_root)
+    finally:
+        if capability_root.exists():
+            shutil.rmtree(capability_root)
+        _fsync_directory(capability_parent)
+    if workspace_root and root.exists():
+        _fsync_directory(root)
+
+
+def _windows_filesystem_capability_probe(
+    root: Path,
+    probe: Path,
+    *,
+    workspace_root: bool = False,
+) -> None:
+    def replace_with_write_through(source: Path, destination: Path) -> None:
+        movefile_replace_existing = 0x1
+        movefile_write_through = 0x8
+        ok = ctypes.windll.kernel32.MoveFileExW(
+            str(source),
+            str(destination),
+            movefile_replace_existing | movefile_write_through,
+        )
+        if not ok:
+            raise ctypes.WinError(ctypes.windll.kernel32.GetLastError())
+
+    _filesystem_capability_probe(
+        root,
+        probe,
+        replace_with_write_through,
+        workspace_root=workspace_root,
+    )
+
+
+def _posix_filesystem_capability_probe(
+    root: Path,
+    probe: Path,
+    *,
+    workspace_root: bool = False,
+) -> None:
+    _filesystem_capability_probe(root, probe, os.replace, workspace_root=workspace_root)
+
+def _windows_filesystem_adapter(
+    root: Path,
+    observer: Any | None = None,
+    capability_probe: Any | None = None,
+    *,
+    workspace_root: bool = False,
+    perform_capability_probe: bool = True,
+) -> str:
     probe = _nearest_existing(root)
+    if not probe.is_dir():
+        probe = probe.parent
+    try:
+        observation = (observer or _windows_filesystem_observation)(probe)
+        str(observation["filesystem"])
+        flags = int(observation["flags"])
+        drive_type = int(observation["drive_type"])
+    except (AttributeError, KeyError, TypeError, ValueError, OSError) as exc:
+        raise ContinuityError("Cannot inspect Windows filesystem semantics", "filesystem_semantics_unsupported") from exc
+    if flags & _WINDOWS_FILE_READ_ONLY_VOLUME:
+        raise ContinuityError("Read-only Windows volumes cannot support mutation", "filesystem_semantics_unsupported")
+    if drive_type not in {2, 3}:
+        raise ContinuityError(
+            "Windows mutation requires a writable fixed or removable volume; remote, optical, RAM, and unresolved volumes are unqualified",
+            "filesystem_semantics_unsupported",
+        )
+    if perform_capability_probe:
+        try:
+            if capability_probe is None:
+                _windows_filesystem_capability_probe(root, probe, workspace_root=workspace_root)
+            else:
+                capability_probe(root, probe)
+        except (ImportError, OSError) as exc:
+            raise ContinuityError("Windows filesystem lacks a required lock, flush, or replacement primitive", "filesystem_semantics_unsupported") from exc
+    # The filesystem label is diagnostic only. Admission follows the Win32 primitive set and observed hazards.
+    return "windows-LockFileEx-MoveFileExW-write-through/v2"
+
+
+def _darwin_filesystem_adapter(
+    root: Path,
+    observer: Any | None = None,
+    capability_probe: Any | None = None,
+    *,
+    workspace_root: bool = False,
+    perform_capability_probe: bool = True,
+) -> str:
+    probe = _nearest_existing(root)
+    if not probe.is_dir():
+        probe = probe.parent
     try:
         observation = (observer or _darwin_filesystem_observation)(probe)
-        filesystem = str(observation["filesystem"]).casefold()
+        str(observation["filesystem"])
         flags = int(observation["flags"])
     except (AttributeError, KeyError, TypeError, ValueError, OSError, UnicodeError) as exc:
-        raise ContinuityError("Cannot inspect Darwin local filesystem semantics", "filesystem_semantics_unsupported") from exc
+        raise ContinuityError("Cannot inspect Darwin filesystem semantics", "filesystem_semantics_unsupported") from exc
     if not flags & _DARWIN_MNT_LOCAL:
         raise ContinuityError("Network and nonlocal Darwin filesystems are outside the qualified mutation boundary", "filesystem_semantics_unsupported")
     if flags & _DARWIN_MNT_RDONLY:
         raise ContinuityError("Read-only Darwin filesystems cannot support mutation", "filesystem_semantics_unsupported")
-    if filesystem not in _DARWIN_LOCAL_FILESYSTEMS:
-        raise ContinuityError(f"Unsupported Darwin filesystem for v2 mutation: {filesystem}", "filesystem_semantics_unsupported")
-    return f"darwin-fcntl-flock-fsync-F_FULLFSYNC-when-available-rename-parent-fsync-{filesystem}/v1"
+    if perform_capability_probe:
+        try:
+            if capability_probe is None:
+                _posix_filesystem_capability_probe(root, probe, workspace_root=workspace_root)
+            else:
+                capability_probe(root, probe)
+        except (ImportError, OSError) as exc:
+            raise ContinuityError("Darwin filesystem lacks a required lock, flush, or replacement primitive", "filesystem_semantics_unsupported") from exc
+    # APFS, HFS, ZFS, and future local filesystem names take the same capability path.
+    return "darwin-fcntl-flock-fsync-F_FULLFSYNC-when-available-rename-parent-fsync/v2"
+
+
+def _parse_linux_mountinfo(mount_id: str, mountinfo_text: str) -> dict[str, Any]:
+    for line in mountinfo_text.splitlines():
+        fields = line.split()
+        if not fields or fields[0] != mount_id:
+            continue
+        try:
+            separator = fields.index("-")
+            filesystem = fields[separator + 1].casefold()
+            mount_options = frozenset(fields[5].casefold().split(","))
+            super_options = frozenset(fields[separator + 3].casefold().split(","))
+            all_options = mount_options | super_options
+        except (IndexError, ValueError):
+            return {}
+        return {
+            "mount_id": mount_id,
+            "device": fields[2],
+            "mount_root": fields[3],
+            "mount_point": fields[4],
+            "filesystem": filesystem,
+            "mount_options": mount_options,
+            "super_options": super_options,
+            "remote": filesystem in _LINUX_REMOTE_FILESYSTEMS,
+            "ephemeral": filesystem in _LINUX_EPHEMERAL_FILESYSTEMS,
+            "volatile": filesystem == "overlay" and bool(
+                all_options & {"volatile", "fsync=volatile", "fsync=off"}
+            ),
+        }
+    return {}
+
+
+def _linux_mount_observation(descriptor: int) -> dict[str, Any]:
+    fdinfo_path = Path(f"/proc/self/fdinfo/{descriptor}")
+    mountinfo_path = Path("/proc/self/mountinfo")
+    if not fdinfo_path.is_file() or not mountinfo_path.is_file():
+        return {}
+    mount_id: str | None = None
+    for line in fdinfo_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("mnt_id:"):
+            mount_id = line.split(":", 1)[1].strip()
+            break
+    if not mount_id:
+        return {}
+    return _parse_linux_mountinfo(mount_id, mountinfo_path.read_text(encoding="utf-8"))
+
+def _linux_filesystem_observation(probe: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(str(probe), flags)
+    try:
+        statvfs = os.fstatvfs(descriptor)
+        observation = _linux_mount_observation(descriptor)
+        observation["readonly"] = bool(statvfs.f_flag & getattr(os, "ST_RDONLY", 1))
+        return observation
+    finally:
+        os.close(descriptor)
+
+
+def _linux_filesystem_adapter(
+    root: Path,
+    observer: Any | None = None,
+    capability_probe: Any | None = None,
+    *,
+    workspace_root: bool = False,
+    perform_capability_probe: bool = True,
+) -> str:
+    probe = _nearest_existing(root)
+    if not probe.is_dir():
+        probe = probe.parent
+    try:
+        observation = (observer or _linux_filesystem_observation)(probe)
+        filesystem = str(observation["filesystem"]).strip().casefold()
+        mount_id = str(observation["mount_id"]).strip()
+        device = str(observation["device"]).strip()
+        if not filesystem or not mount_id or not device:
+            raise ValueError("Linux mount identity is incomplete")
+        readonly = bool(observation["readonly"])
+        remote = bool(observation.get("remote", False)) or filesystem in _LINUX_REMOTE_FILESYSTEMS
+        ephemeral = bool(observation.get("ephemeral", False)) or filesystem in _LINUX_EPHEMERAL_FILESYSTEMS
+        volatile = bool(observation.get("volatile", False))
+    except (AttributeError, KeyError, TypeError, ValueError, OSError, UnicodeError) as exc:
+        raise ContinuityError("Cannot inspect Linux filesystem semantics", "filesystem_semantics_unsupported") from exc
+    if readonly:
+        raise ContinuityError("Read-only Linux filesystems cannot support mutation", "filesystem_semantics_unsupported")
+    if remote:
+        raise ContinuityError("Remote or shared Linux filesystems require a separately qualified distributed-lock boundary", "filesystem_semantics_unsupported")
+    if ephemeral:
+        raise ContinuityError("Memory-backed Linux filesystems cannot provide persistent continuity", "filesystem_semantics_unsupported")
+    if volatile:
+        raise ContinuityError("Volatile OverlayFS explicitly lacks the required sync guarantee", "filesystem_semantics_unsupported")
+    if perform_capability_probe:
+        try:
+            if capability_probe is None:
+                _posix_filesystem_capability_probe(root, probe, workspace_root=workspace_root)
+            else:
+                capability_probe(root, probe)
+        except (ImportError, OSError) as exc:
+            raise ContinuityError("Linux filesystem lacks a required lock, flush, or replacement primitive", "filesystem_semantics_unsupported") from exc
+    # No positive name allowlist: unknown local names qualify when required primitives do; known hazard types still fail closed.
+    return "linux-fcntl-flock-fsync-rename-parent-fsync/v1"
 
 
 def _filesystem_adapter(
@@ -691,38 +1222,241 @@ def _filesystem_adapter(
     *,
     lexical_root: Path | None = None,
     platform_name: str | None = None,
+    windows_observer: Any | None = None,
+    windows_capability_probe: Any | None = None,
     darwin_observer: Any | None = None,
+    linux_observer: Any | None = None,
+    posix_capability_probe: Any | None = None,
+    workspace_root: bool = False,
+    perform_capability_probe: bool = True,
 ) -> str:
     _verify_lexical_identity(root, lexical_root or root)
     observed_platform = platform_name or sys.platform
     if observed_platform == "win32":
-        return _windows_filesystem_adapter(root)
+        return _windows_filesystem_adapter(
+            root,
+            windows_observer,
+            windows_capability_probe,
+            workspace_root=workspace_root,
+            perform_capability_probe=perform_capability_probe,
+        )
     if observed_platform == "darwin":
-        return _darwin_filesystem_adapter(root, darwin_observer)
+        return _darwin_filesystem_adapter(
+            root,
+            darwin_observer,
+            posix_capability_probe,
+            workspace_root=workspace_root,
+            perform_capability_probe=perform_capability_probe,
+        )
+    if observed_platform.startswith("linux"):
+        return _linux_filesystem_adapter(
+            root,
+            linux_observer,
+            posix_capability_probe,
+            workspace_root=workspace_root,
+            perform_capability_probe=perform_capability_probe,
+        )
     raise ContinuityError(
-        "Only qualified local Windows NTFS or Darwin APFS/HFS mutation is supported",
+        "Qualified mutation requires a Windows, Darwin, or Linux primitive adapter",
         "filesystem_semantics_unsupported",
     )
 
+
+_CRITICAL_FILESYSTEM_DIRECTORIES = ("locks", "transactions", "generations", "quarantine")
+
+
+def _filesystem_qualification_witness(
+    root: Path,
+    *,
+    lexical_root: Path | None = None,
+    perform_capability_probe: bool = True,
+) -> dict[str, Any]:
+    adapter = _filesystem_adapter(
+        root,
+        lexical_root=lexical_root,
+        workspace_root=True,
+        perform_capability_probe=perform_capability_probe,
+    )
+    if not root.is_dir():
+        raise ContinuityError("Qualified workspace root is not a directory", "filesystem_semantics_unsupported")
+    critical_items = [(".", root)] + [
+        (name, root / name) for name in _CRITICAL_FILESYSTEM_DIRECTORIES
+    ]
+    critical_identities: dict[str, dict[str, int]] = {}
+    try:
+        for label, path in critical_items:
+            metadata = os.stat(path, follow_symlinks=False)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ContinuityError(
+                    "A critical Continuity directory is missing or indirect",
+                    "filesystem_semantics_unsupported",
+                )
+            if _has_reparse_component(path, root):
+                raise ContinuityError(
+                    "A critical Continuity directory crosses an indirect edge",
+                    "custody_reparse_escape",
+                )
+            if int(metadata.st_ino) == 0:
+                raise ContinuityError(
+                    "A critical Continuity directory file identity is unavailable",
+                    "filesystem_semantics_unsupported",
+                )
+            critical_identities[label] = {
+                "device": int(metadata.st_dev),
+                "inode": int(metadata.st_ino),
+            }
+    except OSError as exc:
+        raise ContinuityError(
+            "A critical Continuity directory identity is unavailable",
+            "filesystem_semantics_unsupported",
+        ) from exc
+    directory_identity_pairs = {
+        (identity["device"], identity["inode"])
+        for identity in critical_identities.values()
+    }
+    if len(directory_identity_pairs) != len(critical_identities):
+        raise ContinuityError(
+            "Critical Continuity directories do not have distinct file identities",
+            "filesystem_semantics_unsupported",
+        )
+    devices = {identity["device"] for identity in critical_identities.values()}
+    if len(devices) != 1:
+        raise ContinuityError("Critical Continuity directories cross filesystem devices", "filesystem_semantics_unsupported")
+    critical = [path for _, path in critical_items]
+    try:
+        lock_device, lock_inode = _direct_regular_file_identity(root / "locks" / "workspace.lock")
+    except OSError as exc:
+        raise ContinuityError("Permanent Continuity lock identity is unavailable", "filesystem_semantics_unsupported") from exc
+    if lock_device != next(iter(devices)):
+        raise ContinuityError("Permanent Continuity lock crosses filesystem devices", "filesystem_semantics_unsupported")
+    observed_platform = sys.platform
+    witness: dict[str, Any] = {
+        "adapter": adapter,
+        "platform": observed_platform,
+        "device": next(iter(devices)),
+        "critical_directory_count": len(critical),
+        "critical_directory_identities": critical_identities,
+        "lock_device": lock_device,
+        "lock_inode": lock_inode,
+    }
+    try:
+        if observed_platform == "win32":
+            observations = [_windows_filesystem_observation(path) for path in critical]
+            identities: set[tuple[str, int]] = set()
+            for observation in observations:
+                volume_path = str(observation.get("volume_path") or "").casefold()
+                volume_serial = observation.get("volume_serial")
+                flags = int(observation.get("flags", _WINDOWS_FILE_READ_ONLY_VOLUME))
+                drive_type = int(observation.get("drive_type", 0))
+                if not volume_path or not isinstance(volume_serial, int):
+                    raise ContinuityError("Windows volume identity is unavailable", "filesystem_semantics_unsupported")
+                if flags & _WINDOWS_FILE_READ_ONLY_VOLUME or drive_type not in {2, 3}:
+                    raise ContinuityError("A critical Windows directory is not on a qualified writable volume", "filesystem_semantics_unsupported")
+                identities.add((volume_path, int(volume_serial)))
+            if len(identities) != 1:
+                raise ContinuityError("Critical Continuity directories cross Windows volume identities", "filesystem_semantics_unsupported")
+            volume_path, volume_serial = next(iter(identities))
+            witness["volume_path"] = volume_path
+            witness["volume_serial"] = volume_serial
+        elif observed_platform == "darwin":
+            observations = [_darwin_filesystem_observation(path) for path in critical]
+            identities: set[tuple[tuple[int, ...], str, str]] = set()
+            for observation in observations:
+                flags = int(observation.get("flags", 0))
+                fsid_value = observation.get("fsid")
+                mount_point = str(observation.get("mount_point") or "")
+                mounted_from = str(observation.get("mounted_from") or "")
+                if (
+                    not isinstance(fsid_value, (tuple, list))
+                    or len(fsid_value) != 2
+                    or not mount_point
+                    or not mounted_from
+                ):
+                    raise ContinuityError("Darwin mount identity is unavailable", "filesystem_semantics_unsupported")
+                if not flags & _DARWIN_MNT_LOCAL or flags & _DARWIN_MNT_RDONLY:
+                    raise ContinuityError("A critical Darwin directory is not on a qualified local writable mount", "filesystem_semantics_unsupported")
+                identities.add((tuple(int(value) for value in fsid_value), mount_point, mounted_from))
+            if len(identities) != 1:
+                raise ContinuityError("Critical Continuity directories cross Darwin mounts", "filesystem_semantics_unsupported")
+            fsid_value, mount_point, mounted_from = next(iter(identities))
+            witness["darwin_fsid"] = list(fsid_value)
+            witness["mount_point"] = mount_point
+            witness["mounted_from"] = mounted_from
+        elif observed_platform.startswith("linux"):
+            observations = [_linux_filesystem_observation(path) for path in critical]
+            identities: set[tuple[str, str]] = set()
+            for observation in observations:
+                mount_id = observation.get("mount_id")
+                device = observation.get("device")
+                if not mount_id or not device:
+                    raise ContinuityError("Linux mount identity is unavailable", "filesystem_semantics_unsupported")
+                if bool(observation.get("readonly", False)):
+                    raise ContinuityError("A critical Linux directory is read-only", "filesystem_semantics_unsupported")
+                if bool(observation.get("remote", False)) or bool(observation.get("ephemeral", False)) or bool(observation.get("volatile", False)):
+                    raise ContinuityError("A critical Linux directory acquired an unqualified mount hazard", "filesystem_semantics_unsupported")
+                identities.add((str(mount_id), str(device)))
+            if len(identities) != 1:
+                raise ContinuityError("Critical Continuity directories cross Linux mounts", "filesystem_semantics_unsupported")
+            mount_id, linux_device = next(iter(identities))
+            witness["mount_id"] = mount_id
+            witness["linux_device"] = linux_device
+    except ContinuityError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError, OSError, UnicodeError) as exc:
+        raise ContinuityError(
+            "Cannot re-observe critical filesystem identities",
+            "filesystem_semantics_unsupported",
+        ) from exc
+    return witness
 
 def mutation_filesystem_support(
     root: Path,
     *,
     lexical_root: Path | None = None,
     platform_name: str | None = None,
+    windows_observer: Any | None = None,
+    windows_capability_probe: Any | None = None,
     darwin_observer: Any | None = None,
+    linux_observer: Any | None = None,
+    posix_capability_probe: Any | None = None,
 ) -> dict[str, Any]:
-    """Report mutation qualification without changing workspace bytes."""
+    """Report non-mutating mutation preflight without claiming primitive qualification."""
     try:
-        adapter = _filesystem_adapter(
-            root,
-            lexical_root=lexical_root,
-            platform_name=platform_name,
-            darwin_observer=darwin_observer,
-        )
-    except ContinuityError as exc:
-        return {"status": "unsupported", "reason_code": exc.code}
-    return {"status": "qualified", "adapter": adapter}
+        if root.is_dir() and platform_name is None and all(
+            value is None
+            for value in (
+                windows_observer,
+                windows_capability_probe,
+                darwin_observer,
+                linux_observer,
+                posix_capability_probe,
+            )
+        ):
+            adapter = _filesystem_qualification_witness(
+                root,
+                lexical_root=lexical_root,
+                perform_capability_probe=False,
+            )["adapter"]
+        else:
+            adapter = _filesystem_adapter(
+                root,
+                lexical_root=lexical_root,
+                platform_name=platform_name,
+                windows_observer=windows_observer,
+                windows_capability_probe=windows_capability_probe,
+                darwin_observer=darwin_observer,
+                linux_observer=linux_observer,
+                posix_capability_probe=posix_capability_probe,
+                perform_capability_probe=False,
+            )
+    except (ContinuityError, OSError) as exc:
+        reason = exc.code if isinstance(exc, ContinuityError) else "filesystem_semantics_unsupported"
+        return {"status": "unsupported", "reason_code": reason}
+    return {
+        "status": "preflight_supported",
+        "adapter": adapter,
+        "transaction_probe_required": True,
+    }
 
 def _selector_custody_boundaries() -> list[Path]:
     """Return every active Nova custody boundary from one stable registry read."""
@@ -753,7 +1487,14 @@ def _is_within(candidate: Path, boundary: Path) -> bool:
         return False
 
 
-def validate_external_target(source_root: Path, value: str, label: str, *, must_be_absent: bool = False) -> Path:
+def validate_external_target(
+    source_root: Path,
+    value: str,
+    label: str,
+    *,
+    must_be_absent: bool = False,
+    require_mutation: bool = True,
+) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ContinuityError(f"{label} is missing", "selector_registry_invalid")
     raw = value.strip()
@@ -771,9 +1512,16 @@ def validate_external_target(source_root: Path, value: str, label: str, *, must_
     for boundary in _selector_custody_boundaries():
         if _is_within(target, boundary):
             raise ContinuityError(f"{label} enters a protected Nova capability boundary", "protected_target_denied")
-    _filesystem_adapter(target, lexical_root=lexical)
     if must_be_absent and target.exists():
         raise ContinuityError(f"{label} must be absent", "protected_target_denied")
+    if require_mutation:
+        # External writes, replacements, directory publication, and deletion all mutate the containing directory.
+        if not target.parent.is_dir():
+            raise ContinuityError(
+                f"{label} requires an existing exact parent directory",
+                "protected_target_denied",
+            )
+        _filesystem_adapter(target.parent, lexical_root=lexical.parent)
     return target
 
 def _path_identity(path: Path) -> str:
@@ -849,9 +1597,9 @@ def validate_nova_migration_destination(
     destination_sha256 = sha256_bytes(_path_identity(target).encode("utf-8"))
     if destination_sha256 != expected_destination:
         raise ContinuityError("Migration destination does not match the exact recorded grant", "authority_denied")
-    _filesystem_adapter(target, lexical_root=lexical)
     if must_be_absent and target.exists():
         raise ContinuityError(f"{label} must be absent", "protected_target_denied")
+    _filesystem_adapter(target.parent, lexical_root=lexical.parent)
     _, _, final_digest = _registry(registry_path)
     if final_digest != digest:
         raise ContinuityError("Trusted Nova selector registry changed during destination authorization", "selector_registry_changed")
@@ -900,9 +1648,23 @@ def revalidate_nova_migration_grant(
         boundary = selected.parent if suffix or selector_name.endswith(("_STORE", "_DATABASE")) else selected
         if _is_within(destination, boundary) or _is_within(boundary, destination):
             raise ContinuityError("Copy migration destination now overlaps an active capability selector", "selector_registry_changed")
-    _filesystem_adapter(destination, lexical_root=Path(token.destination_lexical))
-    if require_destination_absent and destination.exists():
-        raise ContinuityError("Migration destination must remain absent until publication begins", "protected_target_denied")
+    destination_lexical = Path(token.destination_lexical)
+    if require_destination_absent:
+        if destination.exists():
+            raise ContinuityError(
+                "Migration destination must remain absent until publication begins",
+                "protected_target_denied",
+            )
+        _filesystem_adapter(
+            destination.parent,
+            lexical_root=destination_lexical.parent,
+        )
+    else:
+        _filesystem_adapter(
+            destination,
+            lexical_root=destination_lexical,
+            workspace_root=True,
+        )
 
 _PROCESS_STARTED_AT = utc_now()
 _RUNTIME_SESSION_ID = uuid.uuid4().hex
@@ -962,51 +1724,168 @@ def _owner_observation(root: Path) -> dict[str, Any]:
     return {"classification": classification, "owner_token": value.get("owner_token") if isinstance(value, dict) else None}
 
 @contextmanager
-def workspace_lock(root: Path, timeout: float = 0.0, *, transaction_id: str | None = None) -> Iterator[dict[str, Any]]:
-    adapter = _filesystem_adapter(root)
+def workspace_lock(
+    root: Path,
+    timeout: float = 0.0,
+    *,
+    transaction_id: str | None = None,
+    lexical_root: Path | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Acquire the permanent writer lock before any probe or metadata mutation."""
+    lexical = lexical_root or root
+    prelock_witness = _filesystem_qualification_witness(
+        root,
+        lexical_root=lexical,
+        perform_capability_probe=False,
+    )
     locks = root / "locks"
-    locks.mkdir(parents=True, exist_ok=True)
+    if not locks.is_dir() or _has_reparse_component(locks, root):
+        raise ContinuityError(
+            "Permanent Continuity lock directory is missing or indirect",
+            "filesystem_semantics_unsupported",
+        )
     lock_path = locks / "workspace.lock"
-    if not lock_path.exists():
-        _write_new(lock_path, b"\0")
-    descriptor = os.open(str(lock_path), os.O_RDWR)
+    try:
+        lexical_device, lexical_inode = _direct_regular_file_identity(lock_path)
+    except OSError as exc:
+        raise ContinuityError(
+            "Permanent Continuity lock identity is unavailable",
+            "filesystem_semantics_unsupported",
+        ) from exc
+    flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(lock_path), flags)
+    except OSError as exc:
+        raise ContinuityError(
+            "Permanent Continuity lock cannot be opened directly",
+            "filesystem_semantics_unsupported",
+        ) from exc
     acquired = False
     state: Any = None
     deadline = time.monotonic() + max(0.0, timeout)
     try:
+        try:
+            opened = os.fstat(descriptor)
+        except OSError as exc:
+            raise ContinuityError(
+                "Permanent Continuity lock identity cannot be inspected",
+                "filesystem_semantics_unsupported",
+            ) from exc
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or int(opened.st_ino) == 0
+            or int(opened.st_dev) != lexical_device
+            or int(opened.st_ino) != lexical_inode
+        ):
+            raise ContinuityError(
+                "Permanent Continuity lock identity changed while opening",
+                "filesystem_identity_changed",
+            )
         while True:
-            acquired, state = _try_os_lock(descriptor)
+            try:
+                acquired, state = _try_os_lock(descriptor)
+            except OSError as exc:
+                raise ContinuityError(
+                    "Permanent Continuity lock primitive failed",
+                    "filesystem_semantics_unsupported",
+                ) from exc
             if acquired:
                 break
             if time.monotonic() >= deadline:
                 observed = _owner_observation(root)
-                raise ContinuityError(f"Continuity writer lock is busy; owner={observed['classification']}; retry_after_ms=100", "lock_busy")
+                raise ContinuityError(
+                    f"Continuity writer lock is busy; owner={observed['classification']}; retry_after_ms=100",
+                    "lock_busy",
+                )
             time.sleep(min(0.025, max(0.0, deadline - time.monotonic())))
+
+        # The disposable proof is deliberately inside the permanent lock. A busy
+        # contender therefore performs no probe and changes no owner metadata.
+        locked_witness = _filesystem_qualification_witness(
+            root,
+            lexical_root=lexical,
+            perform_capability_probe=True,
+        )
+        if locked_witness != prelock_witness:
+            raise ContinuityError(
+                "Filesystem identity changed while acquiring the writer lock",
+                "filesystem_identity_changed",
+            )
         token = uuid.uuid4().hex + uuid.uuid4().hex
         owner = {
-            "format": LOCK_FORMAT, "owner_token": token, "pid": os.getpid(), "process_started_at": _PROCESS_STARTED_AT,
-            "host": socket.gethostname(), "session_identity": os.environ.get("SESSIONNAME") or _RUNTIME_SESSION_ID,
+            "format": LOCK_FORMAT,
+            "owner_token": token,
+            "pid": os.getpid(),
+            "process_started_at": _PROCESS_STARTED_AT,
+            "host": socket.gethostname(),
+            "session_identity": os.environ.get("SESSIONNAME") or _RUNTIME_SESSION_ID,
             "runtime_identity": f"python-{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "transaction_id": transaction_id, "acquired_at": utc_now(), "adapter": adapter,
+            "transaction_id": transaction_id,
+            "acquired_at": utc_now(),
+            "adapter": locked_witness["adapter"],
+            "filesystem_witness": locked_witness,
             "prior_owner_observation": _owner_observation(root),
         }
-        atomic_json(locks / "workspace-owner.json", owner)
+        try:
+            atomic_json(locks / "workspace-owner.json", owner)
+        except OSError as exc:
+            raise ContinuityError(
+                "Writer lock owner evidence could not be published",
+                "recovery_required",
+            ) from exc
         try:
             yield owner
         finally:
+            primary_exception = sys.exc_info()[1]
             owner_path = locks / "workspace-owner.json"
+            owner_cleanup_error: BaseException | None = None
             try:
                 current = _read_json_path(owner_path)
                 if isinstance(current, dict) and current.get("owner_token") == token:
-                    owner_path.unlink(missing_ok=True)
-            except ContinuityError:
-                pass
+                    owner_path.unlink()
+                    _fsync_directory(locks)
+                else:
+                    owner_cleanup_error = ContinuityError(
+                        "Writer lock owner evidence changed before cleanup",
+                        "recovery_required",
+                    )
+            except (ContinuityError, OSError) as exc:
+                owner_cleanup_error = exc
+            if owner_cleanup_error is not None:
+                if primary_exception is not None:
+                    if hasattr(primary_exception, "add_note"):
+                        primary_exception.add_note(
+                            f"Writer lock owner cleanup was unconfirmed: {owner_cleanup_error}"
+                        )
+                else:
+                    raise ContinuityError(
+                        "Writer lock owner cleanup is unconfirmed",
+                        "recovery_required",
+                    ) from owner_cleanup_error
     finally:
-        try:
-            if acquired:
+        primary_exception = sys.exc_info()[1]
+        release_error: BaseException | None = None
+        if acquired:
+            try:
                 _unlock_os_lock(descriptor, state)
-        finally:
+            except OSError as exc:
+                release_error = exc
+        try:
             os.close(descriptor)
+        except OSError as exc:
+            if release_error is None:
+                release_error = exc
+        if release_error is not None:
+            if primary_exception is not None:
+                if hasattr(primary_exception, "add_note"):
+                    primary_exception.add_note(
+                        f"Permanent writer lock release was unconfirmed: {release_error}"
+                    )
+            else:
+                raise ContinuityError(
+                    "Permanent writer lock release is unconfirmed",
+                    "recovery_required",
+                ) from release_error
 def _crash(point: str) -> None:
     if os.environ.get("CONTINUITY_TEST_FAILPOINT") == point:
         raise ContinuityError(f"Injected failure at {point}", "test_failpoint")
@@ -1014,6 +1893,13 @@ def _crash(point: str) -> None:
         os._exit(97)
 
 def _journal_transition(path: Path, state: str, *, recovery: bool = False, **updates: Any) -> dict[str, Any]:
+    try:
+        _direct_regular_file_identity(path)
+    except OSError as exc:
+        raise ContinuityError(
+            "Transaction journal must remain one direct regular file",
+            "recovery_required",
+        ) from exc
     allowed = {
         "intent_recorded": "bundle_staged", "bundle_staged": "bundle_published", "bundle_published": "commit_ready",
         "commit_ready": "committed", "committed": "finalized",
@@ -1030,22 +1916,73 @@ def _journal_transition(path: Path, state: str, *, recovery: bool = False, **upd
     value = dict(journal)
     value.update(updates)
     value.update({"state": state, "sequence": int(journal.get("sequence", 0)) + 1, "prior_state_digest": prior_digest, "transitioned_at": utc_now()})
-    atomic_json(path, value)
+    try:
+        atomic_json(path, value)
+    except OSError as exc:
+        raise ContinuityError(
+            "Transaction journal transition visibility or durability is unconfirmed",
+            "recovery_required",
+        ) from exc
     return value
 
 def _all_transaction_directories(root: Path) -> list[Path]:
     base = root / "transactions"
-    if not base.is_dir():
-        return []
-    return sorted(item for item in base.iterdir() if item.is_dir())
+    try:
+        base_metadata = os.stat(base, follow_symlinks=False)
+    except OSError as exc:
+        raise ContinuityError(
+            "Transaction custody directory is unavailable",
+            "recovery_required",
+        ) from exc
+    if not stat.S_ISDIR(base_metadata.st_mode) or _has_reparse_component(base, root):
+        raise ContinuityError(
+            "Transaction custody directory must remain one direct directory",
+            "recovery_required",
+        )
+    directories: list[Path] = []
+    try:
+        items = list(base.iterdir())
+    except OSError as exc:
+        raise ContinuityError(
+            "Transaction custody directory cannot be enumerated",
+            "recovery_required",
+        ) from exc
+    for item in items:
+        if _has_reparse_component(item, base):
+            raise ContinuityError(
+                f"Indirect transaction custody entry is forbidden: {item.name}",
+                "recovery_required",
+            )
+        try:
+            metadata = os.stat(item, follow_symlinks=False)
+        except OSError as exc:
+            raise ContinuityError(
+                f"Transaction custody entry identity is unavailable: {item.name}",
+                "recovery_required",
+            ) from exc
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ContinuityError(
+                f"Transaction custody entry must be one direct directory: {item.name}",
+                "recovery_required",
+            )
+        directories.append(item)
+    return sorted(directories)
+
 
 def pending_transactions(root: Path) -> list[Path]:
     pending: list[Path] = []
     for directory in _all_transaction_directories(root):
         journal_path = directory / "journal.json"
-        if not journal_path.is_file():
+        if not os.path.lexists(journal_path):
             pending.append(directory)
             continue
+        try:
+            _direct_regular_file_identity(journal_path)
+        except OSError as exc:
+            raise ContinuityError(
+                f"Transaction journal is not one direct regular file: {directory.name}",
+                "recovery_required",
+            ) from exc
         try:
             state = _read_json_path(journal_path).get("state")
         except ContinuityError:
@@ -1056,26 +1993,94 @@ def pending_transactions(root: Path) -> list[Path]:
     return pending
 
 def _quarantine_path(root: Path, target: Path, transaction_id: str, label: str) -> str | None:
-    if not target.exists():
-        return None
     _inside(root, target)
+    protected = {
+        root,
+        root / "manifest.json",
+        root / "locks",
+        root / "locks" / "workspace.lock",
+        root / "transactions",
+        root / "generations",
+        root / "quarantine",
+    }
+    if target in protected or _has_reparse_component(target, root):
+        raise ContinuityError(
+            "Recovery quarantine target is protected or indirect",
+            "recovery_required",
+        )
     quarantine = root / "quarantine"
-    quarantine.mkdir(parents=True, exist_ok=True)
+    if not quarantine.is_dir() or _has_reparse_component(quarantine, root):
+        raise ContinuityError(
+            "Recovery quarantine custody is missing or indirect",
+            "recovery_required",
+        )
     destination = quarantine / f"{transaction_id}-{label}"
-    suffix = 0
-    while destination.exists():
-        suffix += 1
-        destination = quarantine / f"{transaction_id}-{label}-{suffix}"
-    os.replace(target, destination)
-    _fsync_directory(quarantine)
+    target_present = os.path.lexists(target)
+    destination_present = os.path.lexists(destination)
+    if not target_present:
+        if not destination_present:
+            return None
+        if _has_reparse_component(destination, root):
+            raise ContinuityError(
+                "Prior recovery quarantine result is indirect",
+                "recovery_required",
+            )
+        _fsync_directory(target.parent)
+        _fsync_directory(quarantine)
+        return destination.relative_to(root).as_posix()
+    if destination_present:
+        raise ContinuityError(
+            "Recovery found both source and prior quarantine destination",
+            "recovery_required",
+        )
+    try:
+        _move_path_write_through(target, destination, replace_existing=False)
+    except OSError as exc:
+        # A move can be visible even when the second parent sync fails. Confirm both
+        # parents and accept that exact prior publication on retry.
+        if not os.path.lexists(target) and os.path.lexists(destination):
+            try:
+                _fsync_directory(destination.parent)
+                _fsync_directory(target.parent)
+            except OSError as sync_exc:
+                raise ContinuityError(
+                    "Recovery quarantine move is visible but parent durability is unconfirmed",
+                    "recovery_required",
+                ) from sync_exc
+        else:
+            raise ContinuityError(
+                "Recovery quarantine publication failed",
+                "recovery_required",
+            ) from exc
     return destination.relative_to(root).as_posix()
 
-def _journal_artifacts(root: Path, journal: dict[str, Any]) -> tuple[Path | None, Path | None, Path]:
-    transaction_root = root / "transactions" / str(journal.get("transaction_id") or journal.get("id"))
-    staged_value = journal.get("staged_generation_path")
-    final_value = journal.get("final_generation_path")
-    staged = root / str(staged_value) if isinstance(staged_value, str) else transaction_root / "stage" / str(journal.get("generation_directory") or "unknown")
-    final = root / str(final_value) if isinstance(final_value, str) else None
+
+def _journal_artifacts(root: Path, journal: dict[str, Any]) -> tuple[Path, Path, Path]:
+    transaction_id = str(journal.get("transaction_id") or journal.get("id") or "")
+    new_generation = journal.get("new_generation")
+    if not transaction_id or not isinstance(new_generation, int) or new_generation < 0:
+        raise ContinuityError("Transaction artifact identity is incomplete", "recovery_required")
+    generation_directory = f"g-{new_generation:020d}"
+    transaction_root = root / "transactions" / transaction_id
+    staged = transaction_root / "stage" / generation_directory
+    final = root / "generations" / generation_directory
+    expected_staged = staged.relative_to(root).as_posix()
+    expected_final = final.relative_to(root).as_posix()
+    if (
+        journal.get("generation_directory") != generation_directory
+        or journal.get("staged_generation_path") != expected_staged
+        or journal.get("final_generation_path") != expected_final
+    ):
+        raise ContinuityError(
+            "Transaction artifact paths do not match their deterministic identity",
+            "recovery_required",
+        )
+    for candidate in (transaction_root, staged, final):
+        if _has_reparse_component(candidate, root):
+            raise ContinuityError(
+                "Transaction artifact path crosses an indirect custody edge",
+                "recovery_required",
+            )
     return staged, final, root / "manifest.next"
 
 def _committed_evidence(root: Path, manifest: dict[str, Any], journal: dict[str, Any]) -> None:
@@ -1096,40 +2101,162 @@ def _committed_evidence(root: Path, manifest: dict[str, Any], journal: dict[str,
     if key and (len(matching_entries) != 1 or matching_entries[0].get("idempotency_key") != key or matching_entries[0].get("payload_digest") != journal.get("payload_digest")):
         raise ContinuityError("Committed generation lacks its bound idempotency result", "recovery_required")
 
-def _recover_committed(root: Path, journal_path: Path, manifest: dict[str, Any], journal: dict[str, Any]) -> str:
+def _recovery_witness_updates(
+    journal: dict[str, Any],
+    current_witness: dict[str, Any],
+    *,
+    allow_witness_rebind: bool,
+) -> dict[str, Any]:
+    runtime_identities = journal.get("runtime_identities")
+    original_witness = (
+        runtime_identities.get("filesystem_witness")
+        if isinstance(runtime_identities, dict)
+        else None
+    )
+    if original_witness == current_witness:
+        return {}
+    if not allow_witness_rebind:
+        raise ContinuityError(
+            "Pending transaction filesystem witness differs from the locked workspace",
+            "filesystem_identity_changed",
+        )
+    return {
+        "filesystem_witness_rebound": True,
+        "original_filesystem_witness": original_witness,
+        "recovery_filesystem_witness": current_witness,
+        "filesystem_witness_rebound_at": utc_now(),
+    }
+
+
+def _recover_committed(
+    root: Path,
+    journal_path: Path,
+    manifest: dict[str, Any],
+    journal: dict[str, Any],
+    recovery_witness_updates: dict[str, Any] | None = None,
+) -> str:
     _committed_evidence(root, manifest, journal)
     current = journal
+    witness_updates = dict(recovery_witness_updates or {})
     if current.get("state") != "committed":
-        current = _journal_transition(journal_path, "committed", recovery=True, recovery_disposition="manifest_commit_authoritative", recovered_at=utc_now())
+        # A visible manifest with only commit_ready evidence may follow a crash after a
+        # confirmed replace or an exception after visibility but before durability was
+        # confirmed. Republish the verified bytes through the qualified write-through
+        # path before treating the manifest as authoritative recovery evidence.
+        try:
+            atomic_json(root / "manifest.json", manifest)
+            _fsync_directory(root)
+        except OSError as exc:
+            raise ContinuityError(
+                "Recovery manifest republication durability is unconfirmed",
+                "manifest_durability_uncertain",
+            ) from exc
+        republished_manifest, _ = open_snapshot(root)
+        _committed_evidence(root, republished_manifest, journal)
+        witness_updates["recovery_manifest_republished"] = True
+        current = _journal_transition(
+            journal_path,
+            "committed",
+            recovery=True,
+            recovery_disposition="manifest_commit_authoritative",
+            recovered_at=utc_now(),
+            **witness_updates,
+        )
     if current.get("state") != "finalized":
-        _journal_transition(journal_path, "finalized", recovery=True, recovery_disposition="manifest_commit_authoritative", finalized_at=utc_now())
+        _journal_transition(
+            journal_path,
+            "finalized",
+            recovery=True,
+            recovery_disposition="manifest_commit_authoritative",
+            finalized_at=utc_now(),
+            **witness_updates,
+        )
     return str(journal.get("transaction_id") or journal.get("id"))
 
-def _recover_uncommitted(root: Path, journal_path: Path, manifest: dict[str, Any], journal: dict[str, Any]) -> str:
+
+def _recover_uncommitted(
+    root: Path,
+    journal_path: Path,
+    manifest: dict[str, Any],
+    journal: dict[str, Any],
+    recovery_witness_updates: dict[str, Any] | None = None,
+) -> str:
     if journal.get("state") == "recovery_required":
         raise ContinuityError("A recovery_required transaction requires human disposition", "recovery_required")
     transaction_id = str(journal.get("transaction_id") or journal.get("id"))
     staged, final, manifest_next = _journal_artifacts(root, journal)
+    transaction_root = root / "transactions" / transaction_id
+    # Complete any source-parent sync left uncertain by an already-visible
+    # cross-parent publication before classifying or moving its result.
+    relevant_parents = {
+        transaction_root.parent,
+        transaction_root,
+        staged.parent,
+        final.parent,
+        manifest_next.parent,
+        root / "quarantine",
+    }
+    for parent in relevant_parents:
+        if not os.path.lexists(parent):
+            continue
+        try:
+            _fsync_directory(parent)
+        except OSError as exc:
+            raise ContinuityError(
+                "Recovery could not confirm transaction parent durability",
+                "recovery_required",
+            ) from exc
+    intent_value = journal.get("intent_construction_path")
+    if isinstance(intent_value, str):
+        intent_relative = Path(intent_value)
+        if intent_relative.is_absolute() or any(part in {"", ".", ".."} for part in intent_relative.parts):
+            raise ContinuityError("Intent construction path is invalid", "recovery_required")
+        intent_source = root / intent_relative
+        if _has_reparse_component(intent_source, root):
+            raise ContinuityError("Intent construction path is indirect", "recovery_required")
+        if os.path.lexists(intent_source):
+            _mark_recovery_required(journal_path, "duplicate_intent_publication")
+            raise ContinuityError(
+                "Both published and construction transaction intents are present",
+                "recovery_required",
+            )
     quarantined: list[str] = []
-    if staged is not None:
-        item = _quarantine_path(root, staged, transaction_id, "staged")
-        if item:
-            quarantined.append(item)
-    if final is not None and final.resolve() != generation_path(root, manifest).resolve():
+    item = _quarantine_path(root, staged, transaction_id, "staged")
+    if item:
+        quarantined.append(item)
+    if final != generation_path(root, manifest):
         item = _quarantine_path(root, final, transaction_id, "published")
         if item:
             quarantined.append(item)
-    if manifest_next.is_file():
+    if os.path.lexists(manifest_next):
         try:
             candidate = _read_json_path(manifest_next)
-        except ContinuityError:
-            candidate = {}
-        if candidate.get("committing_transaction_id") in {None, transaction_id}:
-            item = _quarantine_path(root, manifest_next, transaction_id, "manifest-next")
-            if item:
-                quarantined.append(item)
-    _journal_transition(journal_path, "aborted", recovery=True, recovery_disposition="uncommitted_preserved_prior", quarantined=quarantined, aborted_at=utc_now())
+        except ContinuityError as exc:
+            _mark_recovery_required(journal_path, "manifest_next_not_direct_or_valid")
+            raise ContinuityError(
+                "manifest.next is present but cannot be attributed to this transaction",
+                "recovery_required",
+            ) from exc
+        if candidate.get("committing_transaction_id") != transaction_id:
+            _mark_recovery_required(journal_path, "manifest_next_transaction_mismatch")
+            raise ContinuityError(
+                "manifest.next belongs to another or unidentified transaction",
+                "recovery_required",
+            )
+        item = _quarantine_path(root, manifest_next, transaction_id, "manifest-next")
+        if item:
+            quarantined.append(item)
+    _journal_transition(
+        journal_path,
+        "aborted",
+        recovery=True,
+        recovery_disposition="uncommitted_preserved_prior",
+        quarantined=quarantined,
+        aborted_at=utc_now(),
+        **dict(recovery_witness_updates or {}),
+    )
     return transaction_id
+
 
 def _mark_recovery_required(journal_path: Path, reason: str) -> None:
     try:
@@ -1137,12 +2264,18 @@ def _mark_recovery_required(journal_path: Path, reason: str) -> None:
     except ContinuityError:
         pass
 
-def _recover_transactions_locked(root: Path) -> list[str]:
+
+def _recover_transactions_locked(
+    root: Path,
+    current_witness: dict[str, Any],
+    *,
+    allow_witness_rebind: bool,
+) -> list[str]:
     directories = pending_transactions(root)
     if not directories:
         return []
     manifest, _ = open_snapshot(root)
-    parsed: list[tuple[Path, dict[str, Any]]] = []
+    parsed: list[tuple[Path, dict[str, Any], dict[str, Any]]] = []
     for directory in directories:
         path = directory / "journal.json"
         if not path.is_file():
@@ -1152,25 +2285,36 @@ def _recover_transactions_locked(root: Path) -> list[str]:
             raise ContinuityError(f"Invalid transaction journal: {directory.name}", "recovery_required")
         if journal.get("state") == "recovery_required":
             raise ContinuityError("A recovery_required transaction requires human disposition", "recovery_required")
+        witness_updates = _recovery_witness_updates(
+            journal,
+            current_witness,
+            allow_witness_rebind=allow_witness_rebind,
+        )
         if str(journal.get("transaction_id") or journal.get("id")) != directory.name:
             _mark_recovery_required(path, "journal_directory_identity_mismatch")
             raise ContinuityError("Transaction identity and directory disagree", "recovery_required")
-        parsed.append((path, journal))
+        parsed.append((path, journal, witness_updates))
     active_transaction = manifest.get("committing_transaction_id")
-    matching = [(path, journal) for path, journal in parsed if str(journal.get("transaction_id") or journal.get("id")) == active_transaction]
+    matching = [
+        (path, journal, witness_updates)
+        for path, journal, witness_updates in parsed
+        if str(journal.get("transaction_id") or journal.get("id")) == active_transaction
+    ]
     if len(parsed) > 1 and len(matching) != 1:
-        for path, _ in parsed:
+        for path, _, _ in parsed:
             _mark_recovery_required(path, "multiple_unfinished_ambiguous")
         raise ContinuityError("Multiple unfinished journals cannot be reconciled unambiguously", "recovery_required")
     recovered: list[str] = []
     if matching:
-        path, journal = matching[0]
+        path, journal, witness_updates = matching[0]
         try:
-            recovered.append(_recover_committed(root, path, manifest, journal))
+            recovered.append(
+                _recover_committed(root, path, manifest, journal, witness_updates)
+            )
         except ContinuityError:
             _mark_recovery_required(path, "manifest_or_bundle_evidence_disagrees")
             raise
-    for path, journal in parsed:
+    for path, journal, witness_updates in parsed:
         transaction_id = str(journal.get("transaction_id") or journal.get("id"))
         if transaction_id == active_transaction:
             continue
@@ -1179,29 +2323,58 @@ def _recover_transactions_locked(root: Path) -> list[str]:
         final_value = journal.get("final_generation_path")
         active_path = manifest.get("active_generation_path")
         provably_uncommitted = (
-            isinstance(expected, int) and isinstance(new_generation, int)
-            and expected <= int(manifest.get("generation", -1))
-            and new_generation <= int(manifest.get("generation", -1)) + 1
+            isinstance(expected, int)
+            and isinstance(new_generation, int)
+            and expected == manifest.get("generation")
+            and new_generation == int(expected) + 1
             and final_value != active_path
         )
-        if len(parsed) == 1:
-            provably_uncommitted = expected == manifest.get("generation") and new_generation == int(expected) + 1
         if not provably_uncommitted:
             _mark_recovery_required(path, "uncommitted_status_not_provable")
             raise ContinuityError("Unfinished transaction is not safely classifiable", "recovery_required")
-        recovered.append(_recover_uncommitted(root, path, manifest, journal))
+        recovered.append(
+            _recover_uncommitted(root, path, manifest, journal, witness_updates)
+        )
     return recovered
+
 
 def recover_transactions(
     root: Path,
     *,
     lock_timeout: float = 0.0,
     selector: ResolutionToken | None = None,
-) -> list[str]:
-    with workspace_lock(root, lock_timeout, transaction_id="recovery"):
+    include_generation_interval: bool = False,
+) -> list[str] | tuple[list[str], int, int]:
+    lexical_root = Path(selector.selected_lexical) if selector is not None else root
+    with workspace_lock(
+        root,
+        lock_timeout,
+        transaction_id="recovery",
+        lexical_root=lexical_root,
+    ) as lock_owner:
+        locked_witness = dict(lock_owner["filesystem_witness"])
         if selector is not None:
             revalidate_resolution(selector, root)
-        return _recover_transactions_locked(root)
+        current_witness = _filesystem_qualification_witness(
+            root,
+            lexical_root=lexical_root,
+            perform_capability_probe=False,
+        )
+        if current_witness != locked_witness:
+            raise ContinuityError(
+                "Filesystem identity changed before recovery",
+                "filesystem_identity_changed",
+            )
+        generation_before = int(open_snapshot(root)[0]["generation"])
+        recovered = _recover_transactions_locked(
+            root,
+            locked_witness,
+            allow_witness_rebind=True,
+        )
+        generation_after = int(open_snapshot(root)[0]["generation"])
+        if include_generation_interval:
+            return recovered, generation_before, generation_after
+        return recovered
 
 def request_digest(operation: str, payload: Any) -> str:
     return sha256_bytes(dump_canonical({"operation": operation, "payload": payload}).encode("utf-8"))
@@ -1456,10 +2629,13 @@ class WorkspaceTransaction:
         self.finished = False
         self.entered = False
         self.adapter: str | None = None
+        self.filesystem_witness: dict[str, Any] | None = None
+        self.manifest_publication_attempted = False
+        self.manifest_publication_confirmed = False
 
     def __enter__(self) -> "WorkspaceTransaction":
-        # Complete every read-only preflight before acquiring a lock or creating evidence.
-        self.adapter = _filesystem_adapter(self.root, lexical_root=Path(self.resolution_token.selected_lexical) if self.resolution_token else self.root)
+        # Complete read-only generation/idempotency checks before lock acquisition.
+        lexical_root = Path(self.resolution_token.selected_lexical) if self.resolution_token else self.root
         pre_manifest, _ = open_snapshot(self.root)
         observed_generation = int(pre_manifest["generation"])
         if self.expected_generation != observed_generation:
@@ -1467,12 +2643,24 @@ class WorkspaceTransaction:
         duplicate = find_idempotent_receipt(self.root, self.public_idempotency_key, self.request_digest, self.operation)
         if duplicate is not None:
             raise IdempotentReplay(duplicate)
-        self.lock_context = workspace_lock(self.root, self.lock_timeout, transaction_id=self.id)
-        self.lock_context.__enter__()
+        self.lock_context = workspace_lock(
+            self.root,
+            self.lock_timeout,
+            transaction_id=self.id,
+            lexical_root=lexical_root,
+        )
+        lock_owner = self.lock_context.__enter__()
+        self.filesystem_witness = dict(lock_owner["filesystem_witness"])
+        self.adapter = str(self.filesystem_witness["adapter"])
         try:
             if self.resolution_token is not None:
                 revalidate_resolution(self.resolution_token, self.root)
-            _recover_transactions_locked(self.root)
+            self._assert_filesystem_witness("Filesystem identity changed before transaction entry")
+            _recover_transactions_locked(
+                self.root,
+                self.filesystem_witness,
+                allow_witness_rebind=False,
+            )
             self.manifest_before, self.metadata_before = open_snapshot(self.root)
             self.generation_before = int(self.manifest_before["generation"])
             self.generation_after = self.generation_before + 1
@@ -1492,12 +2680,24 @@ class WorkspaceTransaction:
             self.lock_context = None
             raise
 
+    def _assert_filesystem_witness(self, message: str) -> None:
+        try:
+            current = _filesystem_qualification_witness(
+                self.root,
+                lexical_root=Path(self.resolution_token.selected_lexical) if self.resolution_token else self.root,
+                perform_capability_probe=False,
+            )
+        except (ContinuityError, OSError) as exc:
+            raise ContinuityError(message, "filesystem_identity_changed") from exc
+        if current != self.filesystem_witness:
+            raise ContinuityError(message, "filesystem_identity_changed")
     def _record_intent(self) -> None:
         if self.journal_path.exists() or not self.entered or self.adapter is None:
             raise ContinuityError("Transaction intent state is invalid", "internal_unclassified")
+        self._assert_filesystem_witness("Filesystem identity changed before transaction intent")
         _crash("before_intent")
+        intent_root = self.root / "quarantine" / f".{self.id}-intent-{uuid.uuid4().hex}"
         try:
-            self.transaction_root.mkdir(parents=True, exist_ok=False)
             generation_directory = f"g-{self.generation_after:020d}"
             scope = self.request_payload.get("scope") if isinstance(self.request_payload, dict) else None
             intent = {
@@ -1528,6 +2728,7 @@ class WorkspaceTransaction:
                     "python": sys.version.split()[0],
                     "platform": sys.platform,
                     "adapter": self.adapter,
+                    "filesystem_witness": self.filesystem_witness,
                 },
                 "expected_generation": self.generation_before,
                 "new_generation": self.generation_after,
@@ -1537,11 +2738,19 @@ class WorkspaceTransaction:
                 "staged_generation_path": f"transactions/{self.id}/stage/{generation_directory}",
                 "final_generation_path": f"generations/{generation_directory}",
                 "planned_artifacts": [*MEMBERS, "generation.json", "manifest.next"],
+                "intent_construction_path": intent_root.relative_to(self.root).as_posix(),
             }
-            atomic_json(self.journal_path, intent)
+            intent_root.mkdir(parents=False, exist_ok=False)
+            atomic_json(intent_root / "journal.json", intent)
+            _fsync_directory(intent_root)
+            _publish_directory(intent_root, self.transaction_root)
         except BaseException:
+            if intent_root.exists():
+                shutil.rmtree(intent_root, ignore_errors=True)
+                _fsync_directory(intent_root.parent)
             if self.transaction_root.is_dir() and not any(self.transaction_root.iterdir()):
                 self.transaction_root.rmdir()
+                _fsync_directory(self.transaction_root.parent)
             raise
         _crash("after_intent")
     def _member_for(self, path: Path) -> str:
@@ -1694,11 +2903,15 @@ class WorkspaceTransaction:
         _journal_transition(self.journal_path, "bundle_staged", generation_manifest_sha256=generation_digest, member_metadata=member_metadata)
         _crash("after_bundle_staged")
         _crash("before_bundle_publish")
-        final.parent.mkdir(parents=True, exist_ok=True)
+        self._assert_filesystem_witness("Filesystem identity changed before generation publication")
+        if not final.parent.is_dir():
+            raise ContinuityError(
+                "Generation custody directory disappeared before publication",
+                "filesystem_identity_changed",
+            )
         if final.exists():
             raise ContinuityError("Published generation destination already exists", "recovery_required")
-        os.rename(stage, final)
-        _fsync_directory(final.parent)
+        _publish_directory(stage, final)
         _crash("after_bundle_publish")
         _crash("before_bundle_published")
         _journal_transition(self.journal_path, "bundle_published", published_generation_manifest_sha256=generation_digest)
@@ -1727,7 +2940,16 @@ class WorkspaceTransaction:
         _journal_transition(self.journal_path, "commit_ready", manifest_next_sha256=sha256_file(manifest_next_path), next_manifest_generation=self.generation_after)
         _crash("after_commit_ready")
         _crash("before_manifest_commit")
-        adapter = _replace_manifest(manifest_next_path, self.root / "manifest.json")
+        self._assert_filesystem_witness("Filesystem identity changed before manifest publication")
+        self.manifest_publication_attempted = True
+        try:
+            adapter = _replace_manifest(manifest_next_path, self.root / "manifest.json")
+        except OSError as exc:
+            raise ContinuityError(
+                "Manifest publication became visible or failed before durability could be confirmed; explicit recovery is required",
+                "manifest_durability_uncertain",
+            ) from exc
+        self.manifest_publication_confirmed = True
         _crash("after_manifest_commit")
         committed_manifest, _ = open_snapshot(self.root)
         if committed_manifest.get("committing_transaction_id") != self.id:
@@ -1744,7 +2966,26 @@ class WorkspaceTransaction:
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
         try:
-            if self.entered and not self.finished and self.journal_path.is_file():
+            identity_changed = isinstance(exc, ContinuityError) and exc.code == "filesystem_identity_changed"
+            publication_uncertain = (
+                self.manifest_publication_attempted
+                and not self.manifest_publication_confirmed
+            )
+            if publication_uncertain and exc is None:
+                raise ContinuityError(
+                    "Manifest durability is unconfirmed; explicit recovery is required",
+                    "manifest_durability_uncertain",
+                )
+            if (
+                self.entered
+                and not self.finished
+                and self.journal_path.is_file()
+                and not identity_changed
+                and not publication_uncertain
+            ):
+                self._assert_filesystem_witness(
+                    "Filesystem identity changed before automatic exit recovery"
+                )
                 manifest, _ = open_snapshot(self.root)
                 journal = _read_json_path(self.journal_path)
                 if manifest.get("committing_transaction_id") == self.id and manifest.get("generation") == self.generation_after:
@@ -1797,6 +3038,50 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         stable, _ = open_snapshot(root)
         return _read_jsonl_path(generation_path(root, stable) / member)
     return _read_jsonl_path(path)
+def _directory_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(metadata.st_mode) or int(metadata.st_ino) == 0:
+        return None
+    return int(metadata.st_dev), int(metadata.st_ino)
+
+
+def _publish_directory(source: Path, destination: Path) -> str:
+    if destination.exists():
+        raise ContinuityError("Published directory destination already exists", "recovery_required")
+    if int(os.stat(source.parent).st_dev) != int(os.stat(destination.parent).st_dev):
+        raise ContinuityError("Directory publication must remain on one filesystem device", "filesystem_semantics_unsupported")
+    observed_platform = sys.platform
+    try:
+        _move_path_write_through(source, destination, replace_existing=False)
+    except OSError as exc:
+        if exc.errno in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise ContinuityError(
+                "Published directory destination appeared before the atomic no-clobber rename",
+                "recovery_required",
+            ) from exc
+        if destination.exists() and not source.exists():
+            raise ContinuityError(
+                "Directory publication is visible but parent durability is unconfirmed",
+                "recovery_required",
+            ) from exc
+        raise ContinuityError(
+            "Directory publication failed before visibility",
+            "filesystem_semantics_unsupported",
+        ) from exc
+    if observed_platform == "win32":
+        return "windows-MoveFileExW-directory-write-through/v1"
+    if observed_platform == "darwin":
+        return "darwin-renamex_np-RENAME_EXCL-parent-fsync/v1"
+    if observed_platform.startswith("linux"):
+        return "linux-renameat2-RENAME_NOREPLACE-parent-fsync/v1"
+    raise ContinuityError(
+        "Directory publication completed without a supported adapter identity",
+        "filesystem_semantics_unsupported",
+    )
+
 def _base_manifest(*, workspace_id: str, created_at: str, scope: dict[str, Any], sensitivity: str, retention: str) -> dict[str, Any]:
     return {
         "format": FORMAT,
@@ -1862,6 +3147,8 @@ def _publish_initial_workspace(root: Path, manifest: dict[str, Any], rows: dict[
     }
     _write_new(generation_root / "generation.json", (json.dumps(metadata, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
     digest = sha256_file(generation_root / "generation.json")
+    _fsync_directory(generation_root)
+    _fsync_directory(generation_root.parent)
     manifest.update({
         "active_generation_path": "generations/g-00000000000000000000",
         "active_generation_manifest_sha256": digest,
@@ -1871,6 +3158,7 @@ def _publish_initial_workspace(root: Path, manifest: dict[str, Any], rows: dict[
     })
     atomic_json(root / "manifest.json", manifest)
     open_snapshot(root)
+    _fsync_directory(root.parent)
 
 def _initial_receipt_and_idempotency(
     manifest: dict[str, Any], *, transaction_id: str, operation: str, kind: str, selector: str,
@@ -1929,14 +3217,28 @@ def initialize_workspace(
     if not path_value:
         raise ContinuityError("Initialization requires an explicit absent target", "protected_target_denied")
     root, selector = select_workspace(path_value, mode="generic_explicit")
-    _filesystem_adapter(root, lexical_root=Path(selector.selected_lexical))
     if root.exists():
         raise ContinuityError(f"Initialization target must be absent: {root}", "protected_target_denied")
-    root.mkdir(parents=True, exist_ok=False)
+    if not root.parent.is_dir():
+        raise ContinuityError("Initialization requires an existing parent directory", "protected_target_denied")
+    _filesystem_adapter(
+        root, lexical_root=Path(selector.selected_lexical), workspace_root=True
+    )
+    construction = root.parent / f".{root.name}.cc-initialize-{uuid.uuid4().hex}"
+    construction_identity: tuple[int, int] | None = None
+    construction_created = False
+    published = False
     try:
+        construction.mkdir(exist_ok=False)
+        construction_created = True
+        construction_identity = _directory_identity(construction)
+        if construction_identity is None:
+            raise ContinuityError("Initialization construction identity is unavailable", "filesystem_semantics_unsupported")
         for name in ("generations", "transactions", "locks", "quarantine"):
-            (root / name).mkdir(exist_ok=False)
-        _write_new(root / "locks" / "workspace.lock", b"\0")
+            (construction / name).mkdir(exist_ok=False)
+        _write_new(construction / "locks" / "workspace.lock", b"\0")
+        _fsync_directory(construction / "locks")
+        _filesystem_qualification_witness(construction, lexical_root=construction)
         now = utc_now()
         manifest = _base_manifest(
             workspace_id=new_id("CCW"), created_at=now,
@@ -1954,13 +3256,30 @@ def initialize_workspace(
         rows = {name: [] for name in MEMBERS}
         rows["receipts.jsonl"] = [receipt]
         rows["idempotency.jsonl"] = [idempotency]
-        _publish_initial_workspace(root, manifest, rows, transaction_id, "initialize")
+        _publish_initial_workspace(construction, manifest, rows, transaction_id, "initialize")
+        if root.exists():
+            raise ContinuityError("Initialization target appeared before publication", "protected_target_denied")
+        _publish_directory(construction, root)
+        published = True
+        _filesystem_qualification_witness(root, lexical_root=Path(selector.selected_lexical))
         return root, receipt
-    except BaseException:
-        if root.exists() and root.parent.exists():
-            shutil.rmtree(root, ignore_errors=True)
+    except BaseException as exc:
+        retained: list[Path] = []
+        if construction_created and os.path.lexists(construction):
+            retained.append(construction)
+        if os.path.lexists(root) and (
+            published
+            or construction_identity is None
+            or _directory_identity(root) == construction_identity
+        ):
+            retained.append(root)
+        if retained:
+            names = ", ".join(str(path) for path in dict.fromkeys(retained))
+            raise ContinuityError(
+                f"Initialization failed without race-unsafe cleanup; retained path(s): {names}",
+                "recovery_required",
+            ) from exc
         raise
-
 def normalize_legacy_temporal_rows(source_rows: dict[str, list[dict[str, Any]]]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
     fields = {
         "episodes.jsonl": ("valid_from", "valid_to"),
@@ -2071,6 +3390,8 @@ def migrate_copy(
         raise ContinuityError(f"Unsupported migration destination mode: {destination_mode}", "selector_registry_invalid")
     if source == destination or source in destination.parents or destination in source.parents:
         raise ContinuityError("Migration requires a distinct non-nested destination", "protected_target_denied")
+    if not destination.parent.is_dir():
+        raise ContinuityError("Migration requires an existing destination parent directory", "protected_target_denied")
     if _has_reparse_component(source):
         raise ContinuityError("Migration source crosses an unverified reparse edge", "custody_reparse_escape")
     source_manifest = _read_json_path(source / "manifest.json")
@@ -2128,11 +3449,21 @@ def migrate_copy(
     receipt_provenance_digest = sha256_bytes(dump_canonical(receipt_files).encode("utf-8"))
     if nova_grant:
         revalidate_nova_migration_grant(nova_grant, source, destination, require_destination_absent=True)
-    destination.mkdir(parents=True, exist_ok=False)
+    construction = destination.parent / f".{destination.name}.cc-migrate-{uuid.uuid4().hex}"
+    construction_identity: tuple[int, int] | None = None
+    construction_created = False
+    published = False
     try:
+        construction.mkdir(exist_ok=False)
+        construction_created = True
+        construction_identity = _directory_identity(construction)
+        if construction_identity is None:
+            raise ContinuityError("Migration construction identity is unavailable", "filesystem_semantics_unsupported")
         for name in ("generations", "transactions", "locks", "quarantine"):
-            (destination / name).mkdir(exist_ok=False)
-        _write_new(destination / "locks" / "workspace.lock", b"\0")
+            (construction / name).mkdir(exist_ok=False)
+        _write_new(construction / "locks" / "workspace.lock", b"\0")
+        _fsync_directory(construction / "locks")
+        _filesystem_qualification_witness(construction, lexical_root=construction)
         now = utc_now()
         scope = dict(source_manifest.get("scope") or {"user": "unknown", "project": "*", "agent": "nova", "thread": None})
         manifest = _base_manifest(
@@ -2188,15 +3519,36 @@ def migrate_copy(
         rows = {name: list(migrated_rows.get(name, [])) for name in MEMBERS}
         rows["receipts.jsonl"] = [receipt]
         rows["idempotency.jsonl"] = [idempotency]
+        _publish_initial_workspace(construction, manifest, rows, transaction_id, "migrate-copy")
         if nova_grant:
-            revalidate_nova_migration_grant(nova_grant, source, destination, require_destination_absent=False)
-        _publish_initial_workspace(destination, manifest, rows, transaction_id, "migrate-copy")
-        if nova_grant:
-            revalidate_nova_migration_grant(nova_grant, source, destination, require_destination_absent=False)
+            revalidate_nova_migration_grant(nova_grant, source, destination, require_destination_absent=True)
         if tree_digest(source) != source_digest_before:
             raise ContinuityError("Migration source changed during copy", "source_changed")
+        if destination.exists():
+            raise ContinuityError("Migration destination appeared before publication", "protected_target_denied")
+        _publish_directory(construction, destination)
+        published = True
+        if nova_grant:
+            revalidate_nova_migration_grant(nova_grant, source, destination, require_destination_absent=False)
+        _filesystem_qualification_witness(
+            destination,
+            lexical_root=Path(nova_grant.destination_lexical) if nova_grant else destination,
+        )
         return receipt
-    except BaseException:
-        if destination.exists() and destination.parent.exists():
-            shutil.rmtree(destination, ignore_errors=True)
+    except BaseException as exc:
+        retained: list[Path] = []
+        if construction_created and os.path.lexists(construction):
+            retained.append(construction)
+        if os.path.lexists(destination) and (
+            published
+            or construction_identity is None
+            or _directory_identity(destination) == construction_identity
+        ):
+            retained.append(destination)
+        if retained:
+            names = ", ".join(str(path) for path in dict.fromkeys(retained))
+            raise ContinuityError(
+                f"Migration failed without race-unsafe cleanup; retained path(s): {names}",
+                "recovery_required",
+            ) from exc
         raise
