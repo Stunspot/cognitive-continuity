@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from workspace_runtime import ContinuityError, atomic_json, atomic_bytes, read_json, read_jsonl, sha256_file, tree_digest, utc_now, workspace, validate_external_target
+from workspace_runtime import ContinuityError, atomic_new_json, atomic_new_bytes, read_json, read_jsonl, sha256_file, tree_digest, utc_now, workspace, validate_external_target
 from schema_validation import SchemaCatalog
 from eligibility_policy import POLICY_ID, contains_secret_data, evaluate as evaluate_policy, sanitize_text
 from continuity_store_v2 import resolve_scope, scope_matches_query
@@ -243,23 +243,35 @@ def main(argv: list[str] | None = None) -> int:
         })
         if tree_digest(root) != source_before:
             raise ContinuityError("Source changed during context compilation", "source_changed")
+        source_after = tree_digest(root)
+        if source_after != source_before:
+            raise ContinuityError("Source changed before query output publication", "source_changed")
+        metadata["source_tree_sha256_after"] = source_after
         created: list[Path] = []
         try:
-            atomic_bytes(output, markdown.encode("utf-8")); created.append(output)
-            atomic_json(metadata_output, metadata); created.append(metadata_output)
-            source_after = tree_digest(root)
-            if source_after != source_before:
-                raise ContinuityError("Source changed while query output was emitted", "source_changed")
-            metadata["source_tree_sha256_after"] = source_after
-            atomic_json(metadata_output, metadata)
-        except BaseException:
-            for candidate in reversed(created):
-                candidate.unlink(missing_ok=True)
+            atomic_new_bytes(output, markdown.encode("utf-8"))
+            created.append(output)
+            atomic_new_json(metadata_output, metadata)
+            created.append(metadata_output)
+        except BaseException as exc:
+            if created:
+                names = ", ".join(str(candidate) for candidate in created)
+                raise ContinuityError(
+                    f"Compiled context failed without race-unsafe cleanup; retained path(s): {names}",
+                    "recovery_required",
+                ) from exc
             raise
         print(json.dumps(metadata, ensure_ascii=False, indent=2))
         return 0
     except ContinuityError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        error = ContinuityError(
+            f"Native filesystem operation failed without a stronger classification: {exc}",
+            "filesystem_semantics_unsupported",
+        )
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
 

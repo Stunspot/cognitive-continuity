@@ -1,18 +1,51 @@
-# Cognitive Continuity 0.2.3
+# Cognitive Continuity 0.2.4
 
-Status: **canonical standalone successor checkpoint; local and unpublished**.
+Status: **canonical standalone successor source checkpoint**.
 
-No remote release, publication, installation, host discovery, invocation, persistent-store health, or live runtime claim is made by this checkpoint.
+This source checkpoint does not by itself establish a GitHub Release, packaged distribution, installation, host discovery, invocation, persistent-store health, cloud replication, or physical-media survival.
 
 ## Canonical custody and lineage
 
-The standalone `cognitive-continuity` repository is the canonical source authority for the `0.2.3` successor release. Its recorded lineage base is the exact `0.2.2` synchronized payload from:
+The standalone `cognitive-continuity` repository is the canonical source authority for the `0.2.4` successor release. Its recorded lineage base is the exact `0.2.2` synchronized payload from:
 
 - repository: `https://github.com/Stunspot/nova-the-optimal-ai-mind`
 - commit: `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`
 - subtree: `plugins/augment-of-mind/skills/cognitive-continuity`
 
-The integrated commit is lineage evidence, not continuing source authority for the standalone line. The `0.2.2` synchronized set was `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Version `0.2.3` deliberately changes the canonical standalone runtime, focused tests, README, portability reference, and release metadata; it no longer claims byte-for-byte subtree parity. Free Nova `2.1.3` remains an earlier consumer until a separately governed adoption. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+The integrated commit is lineage evidence, not continuing source authority for the standalone line. The `0.2.2` synchronized set was `SKILL.md` plus `adapters/`, `agents/`, `assets/`, `examples/`, `fallbacks/`, `personas/`, `references/`, and `scripts/`. Version `0.2.4` changes the canonical standalone runtime, focused tests, README, portability reference, and release metadata; it no longer claims byte-for-byte subtree parity. Free Nova `2.1.3` remains an earlier consumer until a separately governed adoption. Standalone repository custody remains with `.git/`, `.github/`, `LICENSE.md`, `docs/`, this release documentation, and other standalone-only files.
+
+## 0.2.4 changes
+
+- Removes the inverted positive filesystem-name allowlists. A familiar label never grants mutation and an unfamiliar local label is not rejected for being unfamiliar; documented remote, memory-backed, or volatile hazard types may still fail closed.
+- Adds a native Linux qualification adapter over the existing POSIX transaction engine. It rejects read-only mounts, known remote/shared filesystems, `tmpfs`/`ramfs`, volatile OverlayFS, and failed `flock` or directory-`fsync` probes.
+- Broadens Windows admission from NTFS-only to writable fixed or removable volumes that present the required Win32 primitive set. Remote, optical, RAM, read-only, unknown, and unresolved volumes remain unqualified.
+- Broadens Darwin admission from APFS/HFS-only to any local writable volume that presents the required `flock` and durable-directory primitives. The typed `F_FULLFSYNC`/`fsync` receipt distinction remains intact.
+- Deletes path-name heuristics for cloud-sync brands. A synchronized local replica may qualify for the local transaction protocol, while replication, multi-host conflict handling, and provider durability remain explicitly unproven.
+- Requires a direct permanent regular-file lock and exercises lock, flush, same-directory replacement, parent persistence, and cleanup primitives with residue-free disposable probes.
+- Binds Windows volume serials, Darwin fsid/mount identity, and Linux mount ID/device across the root plus locks, transactions, generations, and quarantine. The witness is rechecked after lock acquisition, before intent, before generation publication, and before manifest replacement; identity drift defers recovery until the filesystem is requalified.
+- Publishes initialization, copy migration, transaction intent, and immutable generations as complete directory moves. Windows uses write-through MoveFileExW; POSIX syncs both rename parents. Recovery quarantine does the same before advancing its journal.
+- Separates Continuity workspace probing from external-file/directory probing so backup keys, plans, exports, and recovery artifacts are not mistaken for workspaces.
+- Acquires the existing direct permanent lock before writable qualification probes or owner-metadata changes, then binds the resulting filesystem witness through the transaction and lifecycle operation.
+- Makes external output publication absent-only and evidence-preserving. Imports bind one captured source snapshot; backups and migrations publish complete sibling constructions; uncertain completion returns `recovery_required` with exact retained paths instead of performing pathname-based cleanup.
+- Makes forget, restore, import, and backup publication replay-safe after a lost response. Destructive lifecycle deletion binds the direct identity of the authorized object, uses immutable intent, quarantined, and final phase records, treats one finalized transaction directory as the lifecycle unit, and fails closed for human disposition after interruption.
+- Adds filesystem-name inversion regressions, Windows/Darwin/Linux hazard and mount-identity seams, cloud-name neutrality, primitive-failure and cleanup tests, publication-order tests, witness-race tests, crash/replay tests, and native Windows/Linux/macOS smoke classes.
+- Removes the full-suite `E:/` assumption and adds a public Windows/macOS/Linux runtime matrix.
+
+Full suite:
+
+```bash
+python -B -X utf8 -m unittest discover -s scripts/tests -p "test_*.py" -v
+```
+
+Focused native smokes:
+
+```bash
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.WindowsLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiveSmokeTests -v
+python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.LinuxLiveSmokeTests -v
+```
+
+Workspace format v2, transaction format v1, selectors, migration contracts, and existing workspaces remain compatible; no workspace migration is required.
 
 ## 0.2.3 changes
 
@@ -45,7 +78,7 @@ python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiv
 - Revalidates the grant before and after publication and removes a candidate if the selector registry or destination identity changes, while preserving v1 byte-for-byte.
 - Keeps migration selector-neutral: candidate qualification and any live selector switch remain separately authorized operations.
 - Derives the selector-registry locator from NOVA_DATA_ROOT, eliminating private workstation path literals from the portable payload.
-- Preserves bounded v1 episode content above the ordinary v2 limit without truncation through migration-only provenance tied to generation 0, the migration receipt, and each retained generation receipt.
+- Preserves bounded v1 episode content exceeding the ordinary v2 limit without truncation through migration-only provenance tied to generation 0, the migration receipt, and each retained generation receipt.
 - Keeps ordinary v2 writes capped, rejects forged or relabeled provenance histories, and protects the retained generation chain required to validate governed forgetting and exact restoration.
 
 ## 0.2.0 changes
@@ -58,6 +91,6 @@ python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.DarwinLiv
 - Accepts maintained v1 0.2.0 manifest extensions and valid full-date effective values. Worldline preserves their settled UTC-midnight meaning in its read-only eligibility view; explicit copy migration applies the same mapping in the successor and binds the normalization count and digest without mutating the source.
 - Keeps portable fallback explicit: source-linked, unpersisted, and without a save claim.
 
-## Local checkpoint evidence
+## 0.2.4 checkpoint evidence
 
-The Windows test gate ran 61 tests in 177.552 seconds: 59 passed, the native Darwin smoke skipped on the non-Darwin host, and the real broken-symlink creation check skipped because this Windows token lacks symlink privilege; the controlled lexical-edge test passed. JSON parsing, generated-cache cleanup, and final diff inspection remain part of the local gate. Windows seam evidence does not establish native Darwin behavior; the Darwin smoke command above remains the explicit live-host gate. This checkpoint does not establish publication, installation, host discovery, consumer adoption, or persistent-store health.
+The final local Windows gate ran 115 tests in 183.284 seconds: 111 passed and 4 host-bound checks skipped. The native Windows initialize-mutate-validate-open smoke also passed independently in 3.116 seconds. Native Darwin and Linux smokes skipped on Windows; two real symlink-creation checks skipped because this token lacks symlink privilege, while their controlled lexical and direct-lock seams passed. The focused portability surface ran 58 tests in 18.721 seconds with the same 4 host-bound checks skipped. Python syntax compilation, JSON parsing, and diff inspection passed. Generated-cache cleanup and successful public Windows/macOS/Linux jobs remain release gates. This component checkpoint does not by itself establish consumer packaging, installation, host discovery, persistent-store health, cloud replication, or physical-media survival.

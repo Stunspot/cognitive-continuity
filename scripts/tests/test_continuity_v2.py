@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -49,7 +50,9 @@ def inventory(root: Path) -> dict[str, str]:
 
 class WorkspaceCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(dir="E:/")
+        candidate = Path("E:/")
+        temporary_parent = str(candidate) if os.name == "nt" and candidate.is_dir() else None
+        self.temporary = tempfile.TemporaryDirectory(dir=temporary_parent)
         self.base = Path(self.temporary.name)
         self.root = self.base / "workspace"
         result = self.cli(STORE, "init", self.root, "--user", "user", "--project", "project", "--agent", "nova")
@@ -288,6 +291,11 @@ class SelectorAndCustodyTests(WorkspaceCase):
                 self.assertEqual(caught.exception.code, "protected_target_denied")
                 self.assertFalse(target.exists())
             prefix = self.base / "NovaData-not-owned" / "artifact.json"
+            with self.assertRaises(runtime.ContinuityError) as missing_parent:
+                runtime.validate_external_target(self.root, str(prefix), "artifact", must_be_absent=True)
+            self.assertEqual(missing_parent.exception.code, "protected_target_denied")
+            self.assertFalse(prefix.parent.exists())
+            prefix.parent.mkdir()
             resolved = runtime.validate_external_target(self.root, str(prefix), "artifact", must_be_absent=True)
             self.assertEqual(resolved, prefix.resolve())
 
@@ -342,6 +350,35 @@ class SelectorAndCustodyTests(WorkspaceCase):
                 self.assertEqual(denied.exception.code, expected_code)
                 self.assertFalse(target.exists())
 
+            _, destination_grant = runtime.validate_nova_migration_destination(
+                legacy,
+                str(destination),
+                "migration destination",
+                grant_id=common["grant_id"],
+                expected_registry_sha256=registry_digest,
+                expected_destination_sha256=destination_digest,
+                must_be_absent=True,
+            )
+            (destination / "locks").mkdir(parents=True)
+            (destination / "locks" / "workspace.lock").write_bytes(b"\0")
+            (destination / "unowned.txt").write_text("racing owner", encoding="utf-8")
+            racing_inventory = inventory(destination)
+            with mock.patch.object(
+                runtime,
+                "_filesystem_adapter",
+                side_effect=AssertionError("occupied guarded target must be rejected before probing"),
+            ) as adapter:
+                with self.assertRaises(runtime.ContinuityError) as occupied:
+                    runtime.revalidate_nova_migration_grant(
+                        destination_grant,
+                        legacy,
+                        destination,
+                        require_destination_absent=True,
+                    )
+            self.assertEqual(occupied.exception.code, "protected_target_denied")
+            adapter.assert_not_called()
+            self.assertEqual(inventory(destination), racing_inventory)
+            shutil.rmtree(destination)
             with mock.patch.dict(os.environ, {"NOVA_CONTINUITY_HOME": str(destination)}):
                 with self.assertRaises(runtime.ContinuityError) as mismatch:
                     runtime.migrate_copy(str(legacy), str(destination), **common)
@@ -368,8 +405,10 @@ class SelectorAndCustodyTests(WorkspaceCase):
                 with mock.patch.object(runtime, "revalidate_nova_migration_grant", side_effect=swap_after_publication):
                     with self.assertRaises(runtime.ContinuityError) as swapped:
                         runtime.migrate_copy(str(legacy), str(swap_destination), **swap_call)
-                self.assertEqual(swapped.exception.code, "selector_registry_changed")
-                self.assertFalse(swap_destination.exists())
+                self.assertEqual(swapped.exception.code, "recovery_required")
+                self.assertTrue(swap_destination.is_dir())
+                self.assertTrue((swap_destination / "manifest.json").is_file())
+                self.assertEqual(inventory(legacy), before)
             finally:
                 registry.write_bytes(registry_bytes)
 
@@ -388,6 +427,7 @@ class SelectorAndCustodyTests(WorkspaceCase):
         nova = self.base / "nova"
         first = nova / "memory" / "continuity-a"
         second = nova / "memory" / "continuity-b"
+        first.parent.mkdir(parents=True)
         runtime.initialize_workspace(str(first), user="user", project="project", agent="nova", thread=None, sensitivity="ordinary", retention="until-user-changes")
         runtime.initialize_workspace(str(second), user="user", project="project", agent="nova", thread=None, sensitivity="ordinary", retention="until-user-changes")
         registry = self._registry(nova, first)
@@ -404,16 +444,36 @@ class SelectorAndCustodyTests(WorkspaceCase):
         self.assertEqual(caught.exception.code, "selector_registry_changed")
         self.assertEqual(inventory(first), before)
 
-    def test_generic_late_reparse_witness_is_denied_under_lock(self) -> None:
+    def test_generic_late_reparse_witness_is_denied_after_direct_lock_acquisition(self) -> None:
         selected, token = runtime.open_workspace(str(self.root), writable=False)
         before = inventory(self.root)
-        with mock.patch.object(runtime, "_has_reparse_component", return_value=True):
+        original_reparse = runtime._has_reparse_component
+        original_try_lock = runtime._try_os_lock
+        acquired = False
+
+        def tracking_try_lock(descriptor: int) -> tuple[bool, object]:
+            nonlocal acquired
+            result = original_try_lock(descriptor)
+            if result[0]:
+                acquired = True
+            return result
+
+        def late_reparse(path: Path, boundary: Path | None = None) -> bool:
+            if acquired and boundary is None and Path(path) == Path(token.selected_lexical):
+                return True
+            return original_reparse(path, boundary)
+
+        with (
+            mock.patch.object(runtime, "_try_os_lock", side_effect=tracking_try_lock),
+            mock.patch.object(runtime, "_has_reparse_component", side_effect=late_reparse),
+        ):
             with self.assertRaises(runtime.ContinuityError) as caught:
                 with runtime.transaction(
                     selected, "late-reparse", expected_generation=0, selector=token,
                     authority="user-stunspot", idempotency_key="late-reparse", request_payload={},
                 ):
                     pass
+        self.assertTrue(acquired)
         self.assertEqual(caught.exception.code, "custody_reparse_escape")
         self.assertEqual(inventory(self.root), before)
 
@@ -483,6 +543,95 @@ class EligibilityTests(WorkspaceCase):
         self.assertFalse(Path(str(output) + ".json").exists())
 
 
+class ExternalPathRoleTests(unittest.TestCase):
+    def test_external_paths_are_qualified_by_operation_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "workspace"
+            root.mkdir()
+            external = base / "input.json"
+            external.write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(store, "validate_external_target", return_value=external) as validate:
+                self.assertEqual(
+                    store._outside_source(root, str(external), "Read input", require_mutation=False),
+                    external,
+                )
+                validate.assert_called_once_with(
+                    root, str(external), "Read input", must_be_absent=False, require_mutation=False,
+                )
+            with mock.patch.object(store, "validate_external_target", return_value=external) as validate:
+                store._outside_source(root, str(external), "Write output", must_be_absent=True)
+                validate.assert_called_once_with(
+                    root, str(external), "Write output", must_be_absent=True, require_mutation=True,
+                )
+
+            key_path = base / "backup.key"
+            key_path.write_bytes(b"k" * 32)
+            with mock.patch.object(store, "validate_external_target", return_value=key_path) as validate:
+                store._load_backup_auth_key(root, str(key_path))
+                validate.assert_called_once_with(
+                    root, str(key_path), "Backup authentication key",
+                    must_be_absent=False, require_mutation=False,
+                )
+
+            plan = {"format": "cd-continuity-forget-plan/v2", "status": "planned", "plan_digest": None}
+            plan["plan_digest"] = store._plan_digest(plan)
+            with (
+                mock.patch.object(store, "_outside_source", return_value=external) as outside,
+                mock.patch.object(store, "read_json", return_value=plan),
+                mock.patch.object(store, "_schema"),
+            ):
+                store._load_plan(root, str(external), plan["plan_digest"])
+                outside.assert_called_once_with(root, str(external), "Forget plan", require_mutation=False)
+
+            (root / "manifest.json").write_text(
+                json.dumps({
+                    "workspace_id": "WS-external-role-test",
+                    "active_generation_path": "generations/g-00000000000000000000",
+                }),
+                encoding="utf-8",
+            )
+            backup = base / "known-backup.json"
+            backup.write_text("backup", encoding="utf-8")
+            receipt = base / "known-export.json"
+            receipt.write_text("receipt", encoding="utf-8")
+            with mock.patch.object(store, "_outside_source", side_effect=lambda _, value, __, **___: Path(value)) as outside:
+                store._artifact_nodes(root, set(), [str(backup)], [str(receipt)])
+                self.assertEqual(
+                    [call.kwargs["require_mutation"] for call in outside.call_args_list],
+                    [False, False],
+                )
+
+            import_args = argparse.Namespace(workspace=str(root), authority="user-stunspot", input=str(external))
+            with (
+                mock.patch.object(store, "_open", return_value=(root, None)),
+                mock.patch.object(store, "require_authority", return_value="user-stunspot"),
+                mock.patch.object(store, "_outside_source", return_value=external) as outside,
+                mock.patch.object(store, "read_json", return_value={}),
+            ):
+                with self.assertRaises(runtime.ContinuityError):
+                    store.cmd_import(import_args)
+                outside.assert_called_once_with(root, str(external), "Import source", require_mutation=False)
+
+            role_args = argparse.Namespace(
+                workspace=str(root), authority="user-stunspot",
+                backup_auth_key_file=str(key_path), backup=str(backup),
+            )
+            common = [
+                mock.patch.object(store, "_open", return_value=(root, None)),
+                mock.patch.object(store, "require_human_authority", return_value="user-stunspot"),
+                mock.patch.object(store, "_load_backup_auth_key", return_value=(b"k" * 32, "key-id")),
+            ]
+            with common[0], common[1], common[2], mock.patch.object(store, "_load_backup", side_effect=RuntimeError("stop")) as load:
+                with self.assertRaisesRegex(RuntimeError, "stop"):
+                    store.cmd_restore_forget(role_args)
+                load.assert_called_once_with(root, str(backup), b"k" * 32, "key-id", require_mutation=False)
+            with common[0], common[1], common[2], mock.patch.object(store, "_load_backup", side_effect=RuntimeError("stop")) as load:
+                with self.assertRaisesRegex(RuntimeError, "stop"):
+                    store.cmd_backup_destroy(role_args)
+                load.assert_called_once_with(root, str(backup), b"k" * 32, "key-id", require_mutation=True)
+
 class LifecycleTests(WorkspaceCase):
     def _plan(self, identifier: str, *, mode: str = "tombstone") -> tuple[Path, dict, str]:
         output = self.base / f"plan-{mode}.json"
@@ -495,7 +644,7 @@ class LifecycleTests(WorkspaceCase):
         )
         return output, json.loads(output.read_text(encoding="utf-8")), retention
 
-    def test_forget_tombstone_full_backup_and_exact_restore(self) -> None:
+    def test_forget_and_restore_lost_responses_replay_before_stale_preconditions(self) -> None:
         canary = "FORGET_CANARY_PRIVATE_TEXT"
         episode = self.episode(canary, key="forget-source")
         plan_path, plan, retention = self._plan(episode["episode_id"])
@@ -504,29 +653,59 @@ class LifecycleTests(WorkspaceCase):
         key = self.base / "backup.key"
         key.write_bytes(b"k" * 48)
         backup = self.base / "forget-backup"
-        receipt = self.cli(
+        forget_generation = self.generation
+        forget_arguments = (
             STORE, "forget", self.root, "--plan", plan_path, "--plan-digest", plan["plan_digest"],
             "--backup-output", backup, "--backup-auth-key-file", key,
             "--retention-until", retention, "--destruction-owner", "user-stunspot",
             "--access-owner", "user-stunspot", "--encryption-disposition", "not-required",
             "--authority", "user-stunspot", "--idempotency-key", "forget-apply",
-            "--expected-generation", self.generation,
+            "--expected-generation", forget_generation,
         )
+        receipt = self.cli(*forget_arguments)
         self.assertEqual(receipt["kind"], "forgotten")
         self.assertTrue((backup / "backup.json").is_file())
+        generation_after_forget = self.generation
+        backup_after_forget = inventory(backup)
+        replayed_forget = self.cli(*forget_arguments)
+        self.assertEqual(replayed_forget["status"], "duplicate_committed")
+        self.assertEqual(replayed_forget["id"], receipt["id"])
+        self.assertEqual(self.generation, generation_after_forget)
+        self.assertEqual(inventory(backup), backup_after_forget)
+
         active = self.root / json.loads((self.root / "manifest.json").read_text())["active_generation_path"]
         active_bytes = b"\n".join(path.read_bytes() for path in active.iterdir() if path.is_file())
         self.assertNotIn(canary.encode(), active_bytes)
         tombstoned = runtime.read_jsonl(self.root / "episodes" / "events.jsonl")[-1]
         self.assertEqual(tombstoned["content"], "[forgotten]")
-        restore = self.cli(
+
+        restore_generation = self.generation
+        restore_arguments = (
             STORE, "restore-forget", self.root, "--backup", backup,
             "--backup-auth-key-file", key, "--authority", "user-stunspot",
-            "--idempotency-key", "forget-restore", "--expected-generation", self.generation,
+            "--idempotency-key", "forget-restore", "--expected-generation", restore_generation,
         )
+        restore = self.cli(*restore_arguments)
         self.assertEqual(restore["kind"], "forget-restored")
+        generation_after_restore = self.generation
+        replayed_restore = self.cli(*restore_arguments)
+        self.assertEqual(replayed_restore["status"], "duplicate_committed")
+        self.assertEqual(replayed_restore["id"], restore["id"])
+        self.assertEqual(self.generation, generation_after_restore)
         restored = runtime.read_jsonl(self.root / "episodes" / "events.jsonl")
         self.assertTrue(any(row.get("content") == canary for row in restored))
+
+        backup_root, metadata, snapshot_bundle, restored_rows = store._load_backup(
+            self.root,
+            str(backup),
+            key.read_bytes(),
+            hashlib.sha256(key.read_bytes()).hexdigest(),
+            require_mutation=False,
+        )
+        self.assertEqual(backup_root, backup.resolve())
+        self.assertEqual(metadata["id"], receipt["backup_id"])
+        self.assertTrue(snapshot_bundle.is_dir())
+        self.assertEqual(set(restored_rows), set(runtime.MEMBERS))
 
     def test_derivative_plan_truthfully_blocks_apply(self) -> None:
         episode = self.episode("derivative source", key="derivative")
@@ -648,7 +827,7 @@ class DestructiveLifecycleTests(WorkspaceCase):
         self.assertEqual(inventory(backup), before_backup)
         self.assertFalse(receipt_path.exists())
 
-    def test_injected_post_intent_failure_emits_partial_receipt_and_preserves_target(self) -> None:
+    def test_injected_post_intent_failure_preserves_phase_and_requires_human_disposition(self) -> None:
         export = self.base / "known-export.json"
         export.write_text(json.dumps({"source_ids": ["external"]}), encoding="utf-8")
         episode = self.episode("external traversal", key="external")
@@ -663,18 +842,130 @@ class DestructiveLifecycleTests(WorkspaceCase):
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
         node = next(node for node in plan["target_graph"] if node["class"] == "known_export")
         receipt_path = self.base / "partial.json"
-        env = dict(os.environ); env["CONTINUITY_LIFECYCLE_FAIL_POINT"] = "after_intent"
-        completed = subprocess.run([
+        command = [
             sys.executable, str(STORE), "delete-named-custody", str(self.root),
             "--authority", "user-stunspot", "--plan", str(plan_path), "--plan-digest", plan["plan_digest"],
             "--target-class", "known_export", "--target", node["path"],
             "--target-sha256", node["artifact_sha256"], "--receipt-output", str(receipt_path),
-        ], text=True, capture_output=True, env=env, timeout=30)
-        self.assertEqual(completed.returncode, 2)
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        self.assertEqual(receipt["status"], "partial_failure")
-        self.assertEqual(receipt["error_code"], "injected_lifecycle_failure")
+        ]
+        env = dict(os.environ); env["CONTINUITY_LIFECYCLE_FAIL_POINT"] = "after_intent"
+        failed = subprocess.run(command, text=True, capture_output=True, env=env, timeout=30)
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("injected_lifecycle_failure", failed.stderr)
+        self.assertFalse(receipt_path.exists())
+        intent_paths = list(self.base.glob(".partial.json.LCR-*.intent.json"))
+        self.assertEqual(len(intent_paths), 1)
+        intent_path = intent_paths[0]
+        intent_before = intent_path.read_bytes()
+        self.assertEqual(json.loads(intent_before.decode("utf-8"))["status"], "intent_recorded")
         self.assertTrue(export.exists())
+
+        retried = subprocess.run(command, text=True, capture_output=True, timeout=30)
+        self.assertEqual(retried.returncode, 2)
+        self.assertIn("recovery_required", retried.stderr)
+        self.assertIn("human disposition", retried.stderr)
+        self.assertTrue(export.exists())
+        self.assertEqual(intent_path.read_bytes(), intent_before)
+        self.assertFalse(receipt_path.exists())
+        self.assertEqual(list(self.base.glob(".partial.json.LCR-*.quarantined.json")), [])
+
+    def test_lifecycle_rejects_same_content_replacement_identity_after_quarantine(self) -> None:
+        target = self.base / "identity-target.json"
+        target.write_text(json.dumps({"same": "content"}), encoding="utf-8")
+        receipt_path = self.base / "identity-delete-receipt.json"
+        receipt = store._lifecycle_receipt_base(
+            operation="delete-named-custody",
+            authority="user-stunspot",
+            workspace_id="workspace-test",
+            plan_id="PLAN-test",
+            plan_digest="a" * 64,
+            target_class="known_export",
+            target=target,
+            target_digest=store._artifact_digest(target),
+            receipt_output=receipt_path,
+            retention_until="2020-01-01T00:00:00Z",
+            destruction_owner="user-stunspot",
+        )
+        authorized_identity = receipt["target_identity_sha256"]
+        stage = target.with_name(f".{target.name}.cd-lifecycle-{receipt['id']}")
+
+        def identity_seam(path: Path) -> str:
+            return "f" * 64 if path == stage else authorized_identity
+
+        with mock.patch.object(store, "_lifecycle_artifact_identity_sha256", side_effect=identity_seam):
+            with self.assertRaises(store.ContinuityError) as caught:
+                store._execute_lifecycle_delete(target, receipt_path, receipt)
+        self.assertEqual(caught.exception.code, "recovery_required")
+        self.assertFalse(target.exists())
+        self.assertTrue(stage.exists())
+        self.assertFalse(receipt_path.exists())
+        self.assertEqual(store._artifact_digest(stage), receipt["target_content_sha256"])
+    def test_lifecycle_receipt_cannot_be_nested_inside_target(self) -> None:
+        export = self.base / "known-export-directory"
+        export.mkdir()
+        (export / "artifact.json").write_text(
+            json.dumps({"source_ids": ["external-directory"]}),
+            encoding="utf-8",
+        )
+        episode = self.episode("external directory traversal", key="external-directory")
+        plan_path = self.base / "overlap-plan.json"
+        self.cli(
+            STORE, "forget-plan", self.root, "--ids", episode["episode_id"],
+            "--authority", "user-stunspot", "--mode", "tombstone", "--plan-output", plan_path,
+            "--plan-minutes", 30, "--retention-until", "2020-01-01T00:00:00Z",
+            "--destruction-owner", "user-stunspot", "--access-owner", "user-stunspot",
+            "--encryption-disposition", "not-required", "--known-export-receipts", export,
+        )
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        node = next(node for node in plan["target_graph"] if node["class"] == "known_export")
+        before = inventory(export)
+        receipt_path = export / "receipt.json"
+        result = self.cli(
+            STORE, "delete-named-custody", self.root, "--authority", "user-stunspot",
+            "--plan", plan_path, "--plan-digest", plan["plan_digest"],
+            "--target-class", "known_export", "--target", node["path"],
+            "--target-sha256", node["artifact_sha256"], "--receipt-output", receipt_path,
+            expected=2,
+        )
+        self.assertIn("protected_target_denied", result["text"])
+        self.assertEqual(inventory(export), before)
+        self.assertFalse(receipt_path.exists())
+
+    def test_finalized_transaction_is_one_whole_lifecycle_unit(self) -> None:
+        episode = self.episode("transaction lifecycle source", key="transaction-lifecycle")
+        identifier = episode["episode_id"]
+        transaction_root = self.root / "transactions" / "TX-finalized-lifecycle-unit"
+        transaction_root.mkdir()
+        (transaction_root / "journal.json").write_text(
+            json.dumps({"state": "finalized", "episode_id": identifier}),
+            encoding="utf-8",
+        )
+        (transaction_root / "companion.json").write_text(
+            json.dumps({"derived_from": [identifier]}),
+            encoding="utf-8",
+        )
+        plan_path = self.base / "transaction-plan.json"
+        self.cli(
+            STORE, "forget-plan", self.root, "--ids", identifier,
+            "--authority", "user-stunspot", "--mode", "tombstone", "--plan-output", plan_path,
+            "--plan-minutes", 30, "--retention-until", "2020-01-01T00:00:00Z",
+            "--destruction-owner", "user-stunspot", "--access-owner", "user-stunspot",
+            "--encryption-disposition", "not-required",
+        )
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        node = next(node for node in plan["target_graph"] if node["class"] == "transaction_journal")
+        self.assertEqual(node["path"], transaction_root.relative_to(self.root).as_posix())
+        self.assertEqual(node["proof"], "whole-finalized-transaction-content-traversal")
+        receipt_path = self.base / "transaction-delete-receipt.json"
+        receipt = self.cli(
+            STORE, "delete-named-custody", self.root, "--authority", "user-stunspot",
+            "--plan", plan_path, "--plan-digest", plan["plan_digest"],
+            "--target-class", "transaction_journal", "--target", node["path"],
+            "--target-sha256", node["artifact_sha256"], "--receipt-output", receipt_path,
+        )
+        self.assertEqual(receipt["status"], "application_deleted")
+        self.assertFalse(transaction_root.exists())
+        self.assertTrue(receipt_path.is_file())
 
 
 class ExportTests(WorkspaceCase):
@@ -697,6 +988,87 @@ class ExportTests(WorkspaceCase):
         receipt_text = receipt_path.read_text(encoding="utf-8")
         self.assertNotIn(str(output), receipt_text)
         self.assertIn('"source_mutated": false', receipt_text.lower())
+
+
+class ImportReliabilityTests(WorkspaceCase):
+    def _export_source(self, name: str) -> Path:
+        self.episode(f"import source {name}", key=f"import-source-{name}")
+        source = self.base / f"{name}.json"
+        self.cli(
+            STORE, "export", self.root, "--output", source,
+            "--authority", "user-stunspot", "--sensitivity", "limited",
+        )
+        return source
+
+    def _import_args(self, source: Path, destination: Path, key: str) -> argparse.Namespace:
+        return argparse.Namespace(
+            workspace=str(self.root),
+            input=str(source),
+            quarantine_output=str(destination),
+            authority="user-stunspot",
+            idempotency_key=key,
+            expected_generation=self.generation,
+        )
+
+    def test_import_consumes_one_stable_source_snapshot(self) -> None:
+        source = self._export_source("stable-import")
+        original_bytes = source.read_bytes()
+        destination = self.base / "stable-quarantine.json"
+        args = self._import_args(source, destination, "stable-import")
+        original_read = store._read_direct_file_bytes
+        source_reads = 0
+
+        def mutate_after_snapshot(path: Path, *, boundary: Path | None = None) -> tuple[bytes, tuple[int, int]]:
+            nonlocal source_reads
+            value, identity = original_read(path, boundary=boundary)
+            if Path(path).resolve() == source.resolve():
+                source_reads += 1
+                if source_reads == 1:
+                    source.write_bytes(b'{"changed_after_snapshot":true}\n')
+            return value, identity
+
+        with mock.patch.object(store, "_read_direct_file_bytes", side_effect=mutate_after_snapshot):
+            result = store.cmd_import(args)
+        self.assertEqual(result["kind"], "import-quarantined")
+        self.assertEqual(source_reads, 1)
+        self.assertNotEqual(source.read_bytes(), original_bytes)
+        self.assertEqual(destination.read_bytes(), original_bytes)
+        self.assertEqual(result["source_sha256"], hashlib.sha256(original_bytes).hexdigest())
+
+    def test_post_commit_lost_response_retains_quarantine_and_replays_idempotently(self) -> None:
+        source = self._export_source("lost-import-response")
+        source_bytes = source.read_bytes()
+        destination = self.base / "lost-response-quarantine.json"
+        args = self._import_args(source, destination, "lost-import-response")
+        expected_generation = args.expected_generation
+        real_transaction = store.transaction
+
+        @contextmanager
+        def fail_after_commit(*positional: object, **keywords: object):
+            with real_transaction(*positional, **keywords) as tx:
+                yield tx
+            raise RuntimeError("response channel failed after commit")
+
+        with (
+            mock.patch.object(store, "transaction", side_effect=fail_after_commit),
+            mock.patch.object(store, "find_idempotent_receipt", side_effect=[None, None]),
+        ):
+            with self.assertRaises(runtime.ContinuityError) as caught:
+                store.cmd_import(args)
+        self.assertEqual(caught.exception.code, "recovery_required")
+        self.assertEqual(self.generation, expected_generation + 1)
+        self.assertEqual(destination.read_bytes(), source_bytes)
+        intent_paths = list(self.base.glob(".lost-response-quarantine.json.import-*.intent.json"))
+        self.assertEqual(len(intent_paths), 1)
+        intent_before = intent_paths[0].read_bytes()
+        quarantine_before = destination.read_bytes()
+        committed_generation = self.generation
+
+        replayed = store.cmd_import(args)
+        self.assertEqual(replayed["status"], "duplicate_committed")
+        self.assertEqual(self.generation, committed_generation)
+        self.assertEqual(destination.read_bytes(), quarantine_before)
+        self.assertEqual(intent_paths[0].read_bytes(), intent_before)
 
 
 class CompatibilityAndRecoveryTests(WorkspaceCase):
@@ -725,6 +1097,7 @@ class CompatibilityAndRecoveryTests(WorkspaceCase):
 
     def test_crash_recovery_preserves_prior_before_commit_and_committed_after_manifest(self) -> None:
         cases = [
+            ("after_bundle_publish", False),
             ("after_bundle_published", False),
             ("after_manifest_commit", True),
         ]

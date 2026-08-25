@@ -1,13 +1,13 @@
 {
   "format": "cognitive-continuity-standalone-release/v1",
   "name": "cognitive-continuity",
-  "version": "0.2.3",
-  "release_status": "canonical_successor_local_unpublished_checkpoint",
+  "version": "0.2.4",
+  "release_status": "canonical_successor_repository_source_checkpoint",
   "custody_status": "canonical_standalone_successor_with_integrated_lineage_base",
   "canonical_authority": {
     "repository": "https://github.com/Stunspot/cognitive-continuity",
     "release_line": "standalone",
-    "version": "0.2.3"
+    "version": "0.2.4"
   },
   "lineage_base": {
     "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",
@@ -27,9 +27,17 @@
     "scripts/"
   ],
   "canonical_successor_changed_paths": [
+    ".github/workflows/runtime-tests.yml",
+    "docs/index.html",
+    "docs/README.md",
     "scripts/workspace_runtime.py",
     "scripts/continuity_store_v2.py",
+    "scripts/compile_context_v2.py",
+    "scripts/error_neighborhood.py",
+    "assets/schemas/lifecycle-receipt-v1.schema.json",
+    "scripts/tests/test_continuity_v2.py",
     "scripts/tests/test_workspace_portability.py",
+    "scripts/README.md",
     "references/portability-and-degraded-operation.md",
     "README.md",
     "RELEASE-NOTES.md",
@@ -46,8 +54,18 @@
   ],
   "boundaries": {
     "filesystem_read": "stable_snapshot_read_independent_of_mutation_qualification",
-    "filesystem_mutation_windows": "local_fixed_ntfs_lockfileex_movefileex_write_through",
-    "filesystem_mutation_darwin": "local_writable_apfs_hfs_flock_fsync_fullfsync_when_available_manifest_last_rename_parent_fsync",
+    "filesystem_mutation_policy": "operating_system_primitives_and_observed_hazards_no_positive_name_allowlist_unknown_local_names_not_rejected",
+    "filesystem_mutation_windows": "writable_fixed_or_removable_lockfileex_movefileex_write_through_remote_optical_ram_readonly_unresolved_rejected",
+    "filesystem_mutation_darwin": "local_writable_flock_fsync_fullfsync_when_available_manifest_last_rename_parent_fsync_name_independent",
+    "filesystem_mutation_linux": "writable_mount_flock_fsync_manifest_last_rename_parent_fsync_known_remote_memory_backed_volatile_rejected_name_independent",
+    "cloud_synchronization": "local_transaction_may_qualify_replication_conflict_backup_and_multihost_semantics_unproven",
+    "directory_publication": "atomic_initialized_migrated_intent_and_generation_directory_moves_with_posix_parent_sync_or_windows_write_through",
+    "filesystem_identity_witness": "windows_volume_serial_darwin_fsid_or_linux_mount_id_bound_across_critical_directories_and_transaction_phases",
+    "external_target_probe_role": "external_files_and_directories_probe_their_filesystem_without_workspace_lock_assumptions_or_residue",
+    "identity_change_recovery": "automatic_mutation_stops_until_explicit_recovery_relocks_and_requalifies",
+    "lock_order": "existing_direct_permanent_lock_acquired_before_writable_probe_or_owner_metadata",
+    "external_publication": "absent_only_exact_snapshot_and_recovery_evidence_retained_on_uncertainty",
+    "lifecycle_interruption": "direct_object_identity_immutable_phases_and_human_disposition_no_external_phase_auto_resume",
     "lexical_identity": "unresolved_path_reparse_and_symlink_witness_preserved_before_mutation",
     "worldline": "read_only_view_no_canonical_writes",
     "worldline_project_scope": "caller_precedence_and_specific_project_global_operative_isolation",
@@ -59,11 +77,13 @@
     "legacy_oversize_content": "lossless_bounded_migration_only_generation_and_receipt_bound"
   },
   "consumer_adoption": {
-    "free_nova_2_1_3": "not_adopted_separate_governed_action_required"
+    "free_nova_2_1_3": "not_adopted_separate_governed_action_required",
+    "other_consumers": "not_established_by_component_checkpoint"
   },
   "publication": {
-    "remote_action_performed": false,
-    "published": false,
+    "source_repository_synchronized": false,
+    "github_release_published": false,
+    "packaged_distribution_published": false,
     "installed": false
   }
 }

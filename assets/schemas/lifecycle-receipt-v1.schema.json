@@ -3,7 +3,7 @@
   "$id":"https://collaborative-dynamics.com/schemas/cognitive-continuity/lifecycle-receipt-v1.json",
   "title":"External Continuity Lifecycle Receipt",
   "type":"object",
-  "required":["format","id","operation","status","created_at","updated_at","authority","workspace_id","plan_id","plan_digest","target_class","target_identity_sha256","target_content_sha256","stage_identity_sha256","lifecycle_outcomes","physical_erasure","error_code"],
+  "required":["format","id","operation","status","created_at","updated_at","authority","workspace_id","plan_id","plan_digest","target_class","target_identity_sha256","target_content_sha256","stage_identity_sha256","backup_authentication_key_id","lifecycle_outcomes","physical_erasure","error_code"],
   "properties":{
     "format":{"const":"cd-continuity-lifecycle-receipt/v1"},
     "id":{"type":"string","pattern":"^LCR-[A-Za-z0-9-]+$"},
@@ -20,6 +20,7 @@
     "target_content_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
     "stage_identity_sha256":{"type":["string","null"],"pattern":"^[a-f0-9]{64}$"},
     "backup_id":{"type":["string","null"]},
+    "backup_authentication_key_id":{"type":["string","null"],"pattern":"^[a-f0-9]{64}$"},
     "retention_until":{"type":["string","null"],"format":"date-time"},
     "destruction_owner":{"type":["string","null"]},
     "lifecycle_outcomes":{"type":"object","required":["deleted_from_named_continuity_custody","physical_erasure_not_established"]},
