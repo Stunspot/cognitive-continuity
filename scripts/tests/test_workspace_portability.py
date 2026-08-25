@@ -32,7 +32,7 @@ def temporary_parent() -> str | None:
 class AdapterSeamTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(dir=temporary_parent())
-        self.base = Path(self.temporary.name)
+        self.base = Path(self.temporary.name).resolve()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

@@ -53,7 +53,7 @@ class WorkspaceCase(unittest.TestCase):
         candidate = Path("E:/")
         temporary_parent = str(candidate) if os.name == "nt" and candidate.is_dir() else None
         self.temporary = tempfile.TemporaryDirectory(dir=temporary_parent)
-        self.base = Path(self.temporary.name)
+        self.base = Path(self.temporary.name).resolve()
         self.root = self.base / "workspace"
         result = self.cli(STORE, "init", self.root, "--user", "user", "--project", "project", "--agent", "nova")
         self.assertEqual(result["format"], runtime.RECEIPT_FORMAT)
