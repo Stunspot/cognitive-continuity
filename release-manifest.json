@@ -81,7 +81,7 @@
     "other_consumers": "not_established_by_component_checkpoint"
   },
   "publication": {
-    "source_repository_synchronized": false,
+    "source_repository_synchronized": true,
     "github_release_published": false,
     "packaged_distribution_published": false,
     "installed": false
