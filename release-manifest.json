@@ -1,13 +1,13 @@
 {
   "format": "cognitive-continuity-standalone-release/v1",
   "name": "cognitive-continuity",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "release_status": "canonical_successor_repository_source_checkpoint",
   "custody_status": "canonical_standalone_successor_with_integrated_lineage_base",
   "canonical_authority": {
     "repository": "https://github.com/Stunspot/cognitive-continuity",
     "release_line": "standalone",
-    "version": "0.2.4"
+    "version": "0.2.5"
   },
   "lineage_base": {
     "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",

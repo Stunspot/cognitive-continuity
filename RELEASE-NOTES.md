@@ -1,3 +1,9 @@
+# Cognitive Continuity 0.2.5
+
+This patch makes the catalog routing cue concise and consistent with its agent metadata. The runtime reports the new implementation version; storage formats, authorization, algorithms, Worldline, and Faultline behavior are unchanged. This remains a canonical source checkpoint, with no standalone packaged distribution or GitHub Release.
+
+The preceding 0.2.4 notes below retain their original evidence scope.
+
 # Cognitive Continuity 0.2.4
 
 Status: **canonical standalone successor source checkpoint**.
