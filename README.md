@@ -8,15 +8,17 @@ Cognitive Continuity carries consequential agent state across tasks while preser
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.4` succeeds `0.2.3` and continues the standalone line rooted in the exact `0.2.2` integrated-subtree lineage base; that integrated repository is no longer the continuing source authority. Private development history remains excluded.
+This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.5` succeeds `0.2.4` and continues the standalone line rooted in the exact `0.2.2` integrated-subtree lineage base; that integrated repository is no longer the continuing source authority. Private development history remains excluded.
 
-- Canonical standalone release: `0.2.4`
+- Canonical standalone release: `0.2.5`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
 - Lineage base: [the exact `0.2.2` integrated subtree at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
 - Release status: canonical successor source checkpoint. Free Nova `2.1.3` remains an earlier consumer; consumer packaging, installation, host discovery, invocation, and persistent-store health remain separate evidence states.
 
-## 0.2.4 service and compatibility boundaries
+Version `0.2.5` records the concise governed-memory, Worldline, and failure-recall routing cue. Runtime algorithms and persistent formats remain unchanged.
+
+## 0.2.5 service and compatibility boundaries
 
 - **Read support and mutation qualification are separate claims.** A valid selected workspace may be inspected without qualifying its filesystem for writes. `continuity_store_v2.py open` reports stable-snapshot read support separately from workspace-format and filesystem mutation status; v1 remains mutation-ineligible even when its filesystem would qualify.
 - **Filesystem names are never positive admission tickets.** Windows, Darwin, and Linux choose an operating-system primitive adapter, reject observed hazards, and verify the required lock and durability operations where the host exposes them. An unfamiliar local filesystem is not rejected merely because its name was absent from a list; a documented hazard type such as memory-backed or remote storage may still fail closed.
