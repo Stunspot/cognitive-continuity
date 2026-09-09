@@ -16,7 +16,7 @@ This repository is the canonical source for the standalone Cognitive Continuity 
 - Lineage base: [the exact `0.2.2` integrated subtree at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
 - Release status: canonical successor source checkpoint. Free Nova `2.1.3` remains an earlier consumer; consumer packaging, installation, host discovery, invocation, and persistent-store health remain separate evidence states.
 
-Version `0.2.5` records the concise governed-memory, Worldline, and failure-recall routing cue. Runtime algorithms and persistent formats remain unchanged.
+Version 0.2.5 originally introduced the concise governed-memory, Worldline, and failure-recall routing cue. The 2026-09-09 owner-authorized maintenance now preserves effective time, record time, scope and source relationships in derived context, includes eligible supporting episodes ahead of unrelated recent history, and exposes eligible related conflicts without selecting them as current authority. Worldline items retain their effective-time and scope fields. Persistent storage formats and mutation algorithms remain unchanged.
 
 ## 0.2.5 service and compatibility boundaries
 
