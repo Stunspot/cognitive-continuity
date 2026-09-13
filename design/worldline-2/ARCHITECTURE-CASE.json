@@ -1,0 +1,424 @@
+{
+  "format": "cd-architecture-case/v1",
+  "case_id": "ARC-WORLDLINE-2",
+  "title": "Worldline 2: Nova's navigable occurrence past",
+  "updated_at": "2026-09-13",
+  "phase": "implementation-partitioned",
+  "status": "conditional",
+  "authority": {
+    "decision_owner": "stunspot",
+    "implementation_authorized": true,
+    "authorized_scope": "Rearchitect Worldline and existing Cognitive Continuity Faculty behavior; deliver Continuity0.3.0, edition-owned MIND0.4.0, Free3.2.0 and Emergent1.1.0 through applicable existing surfaces."
+  },
+  "world_change": "Nova surveys a persistent scrollable index of recognizable things that happened across ordinary conversation and work, then follows selected links to substance retained by its owner.",
+  "scope": [
+    "Existing episode-owned occurrence/control model",
+    "New temporal query and static HTML",
+    "Correction/forget/transfer and immediate legacy history",
+    "Existing Faculty cognition and both editions"
+  ],
+  "non_scope": [
+    "New Faculty/store",
+    "Transcript harvesting/daemon",
+    "Future host capture guarantee",
+    "Retired standalone MIND and parked Arms Reach",
+    "New paid/public/visibility actions"
+  ],
+  "drivers": [
+    {
+      "id": "DRV1",
+      "statement": "Owner intended autobiography, existing product centers project/current-state."
+    },
+    {
+      "id": "DRV2",
+      "statement": "Recognition and links must be easy to use in real work."
+    },
+    {
+      "id": "DRV3",
+      "statement": "Preserve singular existing custody and applicable edition completion."
+    }
+  ],
+  "stakeholders": [
+    {
+      "name": "stunspot",
+      "role": "Intent/authority owner"
+    },
+    {
+      "name": "Nova",
+      "role": "Recognition, integration and live work"
+    },
+    {
+      "name": "Egdod",
+      "role": "Architecture and partition"
+    },
+    {
+      "name": "Cognitive Continuity",
+      "role": "Canonical persistence/lifecycle"
+    },
+    {
+      "name": "Independent reviewers",
+      "role": "Challenge evidence without granting authority"
+    }
+  ],
+  "quality_scenarios": [
+    {
+      "id": "Q1",
+      "stimulus": "Ask what we did this month",
+      "environment": "Native/legacy, projects/projectless and threads",
+      "response": "Compact recognition, sources, grouping and honest coverage",
+      "acceptance": "Fresh-process mixed-month query and HTML"
+    },
+    {
+      "id": "Q2",
+      "stimulus": "Browse past",
+      "environment": "Foreign owners and bounded workspace",
+      "response": "Exact-owner data only; counts computed after scope",
+      "acceptance": "Foreign title/ID/facet/count canaries"
+    },
+    {
+      "id": "Q3",
+      "stimulus": "Replay capture or commit off",
+      "environment": "Transactions and regressing/equal timestamps",
+      "response": "One event; latest committed policy wins; no-retention suppresses before write",
+      "acceptance": "Replay/noop and concurrent lock-time policy tests"
+    },
+    {
+      "id": "Q4",
+      "stimulus": "Correct/retract/forget event",
+      "environment": "Revision family and associative neighbors",
+      "response": "Stable root, no privacy fallback, family removed and neighbors preserved with severed links",
+      "acceptance": "Ordinary-to-sensitive revision plus three-event forget chain"
+    },
+    {
+      "id": "Q5",
+      "stimulus": "Page with changed generation or elapsed expiry",
+      "environment": "Immutable snapshots",
+      "response": "Stable page or typed restart; execution-time privacy checked every read",
+      "acceptance": "Equal-time paging, physical snapshot and expiry/as_of fixtures"
+    },
+    {
+      "id": "Q6",
+      "stimulus": "Read/export/render source",
+      "environment": "Safe absolute paths/URLs and hostile text",
+      "response": "Pointers intact without body/secret/code execution",
+      "acceptance": "Round-trip links and HTML injection fixture"
+    },
+    {
+      "id": "Q7",
+      "stimulus": "Use old history/reader",
+      "environment": "v1/v2 and pre0.3 schema",
+      "response": "Legacy recorded-time visibility; old reader fails without mutation",
+      "acceptance": "Legacy and old-reader fixture"
+    },
+    {
+      "id": "Q8",
+      "stimulus": "Finish ordinary coherent episode",
+      "environment": "Installed ordinary policy",
+      "response": "Faculty captures without repeat consent and only receipt earns saved claim",
+      "acceptance": "Current local capture/reopen plus behavior review"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "A1",
+      "statement": "Existing supported Python closure suffices; fresh-host behavior separately bounded."
+    },
+    {
+      "id": "A2",
+      "statement": "Fixed display offset and caller-supplied calendar bounds suffice now."
+    },
+    {
+      "id": "A3",
+      "statement": "Coherent event granularity fits current generations; measured growth may earn derived index."
+    }
+  ],
+  "modules": [
+    {
+      "id": "M1",
+      "name": "Faculty recognition",
+      "owner": "Nova/Promptcraft",
+      "contract": "Map; C3,C8"
+    },
+    {
+      "id": "M2",
+      "name": "Event/control commands",
+      "owner": "Continuity",
+      "contract": "C1-C4,C8"
+    },
+    {
+      "id": "M3",
+      "name": "Temporal query",
+      "owner": "Continuity",
+      "contract": "C2,C4-C6"
+    },
+    {
+      "id": "M4",
+      "name": "Lifecycle",
+      "owner": "Continuity",
+      "contract": "C4,C6"
+    },
+    {
+      "id": "M5",
+      "name": "Static projection",
+      "owner": "Continuity derivative",
+      "contract": "C7"
+    },
+    {
+      "id": "M6",
+      "name": "Edition integration",
+      "owner": "Root/build owners",
+      "contract": "WP3-WP4"
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "C1 occurrence",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C2 historical owner scope",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C3 capture/policy",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C4 correction/forget",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C5 query/paging",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C6 legacy/transfer",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C7 static HTML/degradation",
+      "artifact": "CONTRACTS.md"
+    },
+    {
+      "name": "C8 convenient CLI",
+      "artifact": "CONTRACTS.md"
+    }
+  ],
+  "state_owners": [
+    {
+      "state": "Occurrence/control",
+      "owner": "Existing Continuity episode ledger"
+    },
+    {
+      "state": "Current typed state",
+      "owner": "Existing typed-state owner unchanged"
+    },
+    {
+      "state": "Source content",
+      "owner": "Original source owner"
+    },
+    {
+      "state": "Views",
+      "owner": "Derived, not canon"
+    },
+    {
+      "state": "Build/release",
+      "owner": "Root BUILD-STATE.md and estate contracts"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "status": "decided",
+      "choice": "First-class autobiography in existing Faculty/base service, no new store/core",
+      "alternatives": [
+        "Prompt-only",
+        "Wider project key",
+        "Independent database"
+      ],
+      "reason": "Owner wants temporal recognition and existing lifecycle is sufficient",
+      "consequence": "Cognition and runtime change together; 17 cores retained",
+      "revisit": "Measured unsupported ownership/scale need"
+    },
+    {
+      "id": "D2",
+      "status": "decided",
+      "choice": "Existing transactions for events and ordinary/off permission control",
+      "alternatives": [
+        "Uncontrolled files",
+        "Always-on",
+        "Consent each event"
+      ],
+      "reason": "Persistence and human authority without friction",
+      "consequence": "Lock-time policy check and current no-retention guard",
+      "revisit": "Separately authorized host capture adapter"
+    },
+    {
+      "id": "D3",
+      "status": "decided",
+      "choice": "New timeline API beside v1 project API",
+      "alternatives": [
+        "Change wildcard globally",
+        "Delete old API"
+      ],
+      "reason": "Current-state and historic eligibility differ",
+      "consequence": "Explicit separate contracts and compatibility tests",
+      "revisit": "All legacy consumers retired"
+    },
+    {
+      "id": "D4",
+      "status": "decided",
+      "choice": "Stable root/revisions/retraction and family privacy; association edges severed",
+      "alternatives": [
+        "Overwrite",
+        "Revision as extra event",
+        "Erase associative graph"
+      ],
+      "reason": "Preserve historic identity and avoid sensitive resurfacing/cascade loss",
+      "consequence": "Current family envelope, family forget and neighbor preservation",
+      "revisit": "Concrete richer relation need"
+    },
+    {
+      "id": "D5",
+      "status": "decided",
+      "choice": "Continuity0.3.0, embedded MIND0.4.0, Free3.2.0, Emergent1.1.0; no destructive migration",
+      "alternatives": [
+        "Same-version patch",
+        "Assume old readers compatible"
+      ],
+      "reason": "New behavior/schema admission changes promise",
+      "consequence": "Coordinated consumer update, capable runtime retained for rollback; standalone MIND unchanged",
+      "revisit": "Future major workspace migration"
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "risk": "Project/current-state gating persists",
+      "mitigation": "C2 separate query plus Faculty delta"
+    },
+    {
+      "id": "R2",
+      "risk": "Forget leaks or erases associations",
+      "mitigation": "C4 exact family scrub and edge severing"
+    },
+    {
+      "id": "R3",
+      "risk": "Links destroyed/unsafe HTML",
+      "mitigation": "C1 structured safe pointers; C7 escaping"
+    },
+    {
+      "id": "R4",
+      "risk": "Old as_of/clock regression bypasses control",
+      "mitigation": "Execution-time privacy, ledger-order policy and lock checks"
+    },
+    {
+      "id": "R5",
+      "risk": "Old runtime damages evolved store",
+      "mitigation": "C6 fail-closed fixture/minimum runtime"
+    },
+    {
+      "id": "R6",
+      "risk": "View implies complete life or future host guarantees",
+      "mitigation": "Coverage and bounded live witness"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "E1",
+      "state": "observed",
+      "source": "Current user conversation 2026-09-13",
+      "supports": "Autobiography index and authorized rebuild/both editions"
+    },
+    {
+      "id": "E2",
+      "state": "observed",
+      "source": "Continuity HEAD 2ad8d8808af2bdada7bbb8a57eafdd062818033a",
+      "supports": "Current query/schema/lifecycle defects"
+    },
+    {
+      "id": "E3",
+      "state": "observed",
+      "source": "Free current cognitive-continuity.core.md",
+      "supports": "Existing Faculty explicitly suppresses biography"
+    },
+    {
+      "id": "E4",
+      "state": "decided",
+      "source": "CONTRACTS.md C1-C8",
+      "supports": "Design semantics, not implementation evidence"
+    }
+  ],
+  "intent_items": [
+    {
+      "id": "INT1",
+      "intent": "Recognizable occurrence plus pointers, not body/journal",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT2",
+      "intent": "Ordinary/projectless autobiographical past",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT3",
+      "intent": "Honest time, owner, sources and durable retrieval",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT4",
+      "intent": "Month overview, paging, search, links and scrollable view",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT5",
+      "intent": "Correction, retraction, forgetting and transfer preserve privacy/history",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT6",
+      "intent": "Actual coherent authorized capture/recall; off/no-retention and no-repeat consent",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT7",
+      "intent": "Both editions/existing Faculty with singular custody and applicable delivery",
+      "owner": "stunspot"
+    },
+    {
+      "id": "INT8",
+      "intent": "Existing retained history useful immediately; coverage/host limits honest",
+      "owner": "stunspot"
+    }
+  ],
+  "traceability": {
+    "ledger_artifact": "TRACEABILITY.md",
+    "case_revision": "1",
+    "consistency_state": "conditional",
+    "open_finding_ids": [
+      "REVIEW-PENDING"
+    ]
+  },
+  "convergence": {
+    "implementation_revision": null,
+    "assessment_state": "not-assessed",
+    "open_gap_ids": [],
+    "repair_packet_ids": []
+  },
+  "artifacts": [
+    "CAPABILITY-DECISION.md",
+    "BEHAVIOR-SEED.md",
+    "AUGMENT-MAP.md",
+    "CONTRACTS.md",
+    "TRACEABILITY.md",
+    "WORK-PACKETS.md",
+    "BUILD-STATE.md"
+  ],
+  "views": [],
+  "blockers": [],
+  "next_action": {
+    "action": "Review revision1 and close concrete contradictions; root then partitions authorized implementation.",
+    "owner": "Root and independent architecture reviewer",
+    "advance_when": "No blocking contract/ownership finding; implementation authority already exists."
+  }
+}

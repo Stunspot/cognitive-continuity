@@ -2,23 +2,35 @@
 
 ![A luminous continuity thread passes through layered records, revisions, conflicts, and task-shaped packets.](docs/assets/cognitive-continuity-hero.png)
 
-> **Carry forward what responsible action requires. Let everything else earn its context cost.**
+> **Keep a past worth thinking with. Recognize what happened; follow the source when it matters.**
 
-Cognitive Continuity carries consequential agent state across tasks while preserving scope, provenance, authority, valid time, correction, privacy, and forgetting boundaries. It treats cognition as an adaptive system of evidence, salience, obligation, permission, retrieval, consolidation, and forgetting under finite attention—without implying subjective identity.
+Cognitive Continuity gives Nova a persistent past and governed current state. Worldline is its autobiographical timeline: recognizable occurrences, honest time and links to substance held by its existing owner. Conversations and explorations belong even without a named project or deliverable. Scope, provenance, authority, correction, privacy and forgetting stay attached to the records.
 
 **[Open the project site →](https://stunspot.github.io/cognitive-continuity/)**
 
-This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.2.5` succeeds `0.2.4` and continues the standalone line rooted in the exact `0.2.2` integrated-subtree lineage base; that integrated repository is no longer the continuing source authority. Private development history remains excluded.
+This repository is the canonical source for the standalone Cognitive Continuity release line. Version `0.3.0` succeeds `0.2.5` and continues the standalone line rooted in the exact `0.2.2` integrated-subtree lineage base; that integrated repository is no longer the continuing source authority. Private development history remains excluded.
 
-- Canonical standalone release: `0.2.5`
+- Canonical component source: `0.3.0`
 - Skill: [`SKILL.md`](SKILL.md)
 - License: [MIT](LICENSE.md)
 - Lineage base: [the exact `0.2.2` integrated subtree at `c48a25b0a1d510d075bc3a519bbc5fab1c6afa33`](https://github.com/Stunspot/nova-the-optimal-ai-mind/tree/c48a25b0a1d510d075bc3a519bbc5fab1c6afa33/plugins/augment-of-mind/skills/cognitive-continuity)
-- Release status: canonical successor source checkpoint. Free Nova `2.1.3` remains an earlier consumer; consumer packaging, installation, host discovery, invocation, and persistent-store health remain separate evidence states.
+- Release status: canonical component source for adoption by Free Nova `3.2.0` and Nova Emergent `1.1.0`; edition delivery and installation are tracked by their owners. This update creates no separate standalone package.
 
-Version `0.2.5` records the concise governed-memory, Worldline, and failure-recall routing cue. Runtime algorithms and persistent formats remain unchanged.
+Worldline 2 adds chronological browsing, period overviews, event inspection and a
+bounded scrollable HTML view. Natural-episode capture records a small title, time,
+source pointers and optional facets through the existing governed transaction.
+Stored `ordinary`/`off` control governs routine capture; current no-retention
+instructions still take precedence. Existing retained episodes are immediately
+visible with honest recorded-time placement. No transcript daemon or historical
+backfill is implied.
 
-## 0.2.5 service and compatibility boundaries
+Start with [the timeline contract](references/worldline-timeline.md) and
+[the command guide](scripts/README.md). The old `worldline.py` project interface
+remains available for bounded resumption, status and handoff. Native occurrence
+and policy fields require a 0.3.0-capable reader; rollback of an evolved store
+must retain that reader or use a separately preserved pre-event copy.
+
+## Service and compatibility boundaries
 
 - **Read support and mutation qualification are separate claims.** A valid selected workspace may be inspected without qualifying its filesystem for writes. `continuity_store_v2.py open` reports stable-snapshot read support separately from workspace-format and filesystem mutation status; v1 remains mutation-ineligible even when its filesystem would qualify.
 - **Filesystem names are never positive admission tickets.** Windows, Darwin, and Linux choose an operating-system primitive adapter, reject observed hazards, and verify the required lock and durability operations where the host exposes them. An unfamiliar local filesystem is not rejected merely because its name was absent from a list; a documented hazard type such as memory-backed or remote storage may still fail closed.
@@ -49,7 +61,7 @@ python -B -X utf8 -m unittest scripts.tests.test_workspace_portability.LinuxLive
 
 Each smoke creates a temporary v2 workspace, mutates it under the native lock, validates the immutable generation, checks the capability report, and verifies the platform's manifest-commit receipt. A temporary-host smoke establishes the transaction implementation on that host; it does not turn an ephemeral runner or synchronized replica into permanent storage.
 
-- **Worldline** is the read-only project-continuity service and view over Cognitive Continuity. Its `Resume`, `Status`, `Checkpoint`, and `Inspect` operations never perform canonical writes or issue persistence receipts. When durable state is unavailable, a portable result must be source-linked, explicitly unpersisted, and carry no save claim.
+- **Worldline** is the occurrence timeline over the existing Continuity ledger. `browse`, `overview` and `inspect` are views; `render` produces an explicitly named derivative. `capture` and `policy` delegate governed writes and return receipts. The legacy project `Resume`, `Status`, `Checkpoint` and `Inspect` operations remain read-only. An unpersisted fallback never earns a save claim.
 - **Faultline** is a bounded cue over Continuity-owned failure evidence. It returns zero to three expiring Error Neighborhood cards only for a materially similar risky operation or after an error, correction, or resumption. It is not a router, store, permission source, causal engine, repair engine, or procedure installer.
 - **Continuity v1 is read-only through the v2 surface.** Worldline may inspect and explicitly degrade a v1 workspace, preserving valid legacy full-date eligibility as the equivalent UTC-midnight instant without changing source bytes. Mutation is rejected until an exact copy migration creates a distinct v2 workspace. Faultline is typed unsupported on v1; the source workspace is never upgraded in place.
 - **Copy migration preserves legacy time meaning.** A valid v1 full-date effective value is deterministically represented as UTC midnight in the distinct v2 successor. The authority- and source-hash-bound receipt records the normalization count and digest; v1 bytes remain unchanged.
@@ -64,8 +76,9 @@ Cognitive Continuity begins from the live request, current workspace, and availa
 
 | Mode | Operation |
 |---|---|
+| **Browse / overview / inspect** | Survey a bounded retained past, recognize occurrences and follow useful source links. |
 | **Resume** | Validate state, compile task context, expose consequential uncertainty, and continue the actual task. |
-| **Capture** | Append the source episode before proposing or applying typed state. |
+| **Capture** | Retain a coherent occurrence with its source pointers; append source evidence before typed state. |
 | **Compile** | Build a bounded packet from role, goals, commitments, beliefs, decisions, permissions, procedures, failures, and recent episodes. |
 | **Consolidate** | Process unconsolidated episodes into sourced proposals, conflicts, expiries, and procedural candidates off the live path. |
 | **Correct or forget** | Supersede stale state or traverse source and derivatives for deletion, then verify and receipt the result. |
@@ -76,11 +89,10 @@ Cognitive Continuity begins from the live request, current workspace, and availa
 ## A useful invocation
 
 ```text
-Use $cognitive-continuity to resume this project. Inspect the available
-continuity state before asking questions, validate scope and authority,
-compile only the records needed for the present task, surface any consequential
-conflict or degraded guarantee, continue the work, and finish with the smallest
-useful packet or receipt for the next competent Agent.
+Use $cognitive-continuity to show what we have been doing this month.
+Survey the retained Worldline across projects and conversations, group the
+recognizable occurrences, show the useful links and preserve coverage limits.
+Open a source only where its substance helps us think about what comes next.
 ```
 
 If no writable workspace exists, the skill can still produce copy-ready artifacts—but it must name the exact persistence, validation, or deletion guarantee that was lost.
@@ -106,9 +118,9 @@ Every consequential record carries a stable ID, kind, status, scope, content, va
 
 Current means authorized for ordinary use—not universally true. Beliefs can remain uncertain. Decisions can reopen. Permissions can expire or be revoked. Commitments can be completed or released.
 
-## Compile the task, not the biography
+## Compile bounded current-task context
 
-A useful context packet is task-shaped state assembled under a budget from nine responsibilities:
+Autobiographical orientation uses the timeline. Executing a present task can also require a task-shaped state packet assembled under a budget from nine responsibilities:
 
 ```text
 identity and role
@@ -127,7 +139,7 @@ Compilation runs in two passes:
 1. **Deterministic eligibility:** remove wrong-scope, tombstoned, expired, invalid-time, forbidden-sensitivity, and unreachable-source records. Preserve unresolved conflicts. Reserve space for active commitments, operative permissions or revocations, and high-consequence known failures.
 2. **Semantic utility:** rank eligible records by direct relevance, authority, freshness, obligation or permission consequence, known-failure prevention, and marginal value per token.
 
-Prefer one source-grounded current record over several redundant episodes. Keep an episode when local sequence or exact wording matters. When the budget is tight, drop low-consequence biography and redundant support before commitments, permissions, current decisions, or catastrophic failure warnings.
+Prefer one source-grounded current record over several redundant episodes. Keep an episode when local sequence or exact wording matters. When this current-task packet is tight, retain commitments, permissions, current decisions and consequential failure warnings before incidental chronology. The wider past remains available through the timeline.
 
 A packet is derived, not canonical. It names its task, scope, creation time, budget, compiler mode, selected IDs, unresolved conflicts, capability limits, and expiry, and must be recompiled when task, authority, or current state changes.
 
@@ -146,6 +158,6 @@ The package cannot guarantee erasure from Git history, backups, snapshots, scree
 
 When Python and file authority exist, the package provides deterministic scripts for storage, context compilation, and validation. Imported text, tool output, memories, and DREAM reports remain evidence rather than instructions.
 
-Low-risk explicit “remember this” requests may be recorded with a visible receipt. Never convert inference into user truth, approval into execution, execution into verification, or persistence into learning.
+Explicit “remember this” requests may be recorded with a visible receipt. Routine ordinary occurrence capture can proceed under an established standing policy without asking again for each event. Never convert inference into user truth, approval into execution, execution into verification, or persistence into learning.
 
-Completion means the next competent Agent can continue correctly from inspectable state—not that every available fact was retained.
+A useful result leaves the past recognizable and the present work able to continue from inspectable evidence.
