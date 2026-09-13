@@ -1,26 +1,36 @@
-# Codex Adapter
+# Codex adapter
 
-## Install for local evaluation
+When Cognitive Continuity is supplied by a Nova edition, use that edition's
+installation and Nova Operations setup flow. The edition owns its package layout,
+launcher and installed-copy adoption. This component source update does not create
+a second standalone distribution or require an extra dreaming companion.
 
-Copy both sibling folders from the package's `skills/` directory into your Codex skills directory, preserving their names:
-
-```text
-%USERPROFILE%\.codex\skills\cognitive-continuity
-%USERPROFILE%\.codex\skills\agent-dreaming
-```
-
-The companion uses package-relative paths to the primary folder, so install both together. Start a new Codex task or restart Codex if discovery does not refresh.
-
-Invoke explicitly the first time:
+Start from the work in ordinary language:
 
 ```text
-$cognitive-continuity Set up continuity for this project and resume from the available files.
+Nova, show me what we have been doing this month. Give me the recognizable
+occurrences and useful links, across projects and conversations.
 ```
 
-Use `$agent-dreaming` only for a bounded DREAM run. Codex tool approval, filesystem sandboxing, network access, and external-action authority remain host controls. The SKILL grants none of them.
+Worldline resolves the selected Continuity workspace and its exact user/agent
+identity, then surveys a bounded timeline. A project name is optional. For an
+explicit source-level invocation, use `$cognitive-continuity` and the same request;
+see `../scripts/README.md` for the CLI and JSON interfaces.
 
-The recommended data workspace is project-local `.continuity/`, separate from the installed SKILL files. Do not store user state inside the plugin or SKILL cache.
+Nova-owned data belongs in the customer-approved estate selected by
+`NOVA_CONTINUITY_HOME` and the registry-backed Nova Operations launcher, outside
+Codex's skill/plugin cache and outside `.codex`. Installed source files are not
+data custody or write authorization. Explicit generic component workspaces remain
+possible under the store's existing selection contract. Do not initialize or
+migrate merely because a read request lacks a writable store.
 
-## Exact untested boundary
+During setup or an explicit later choice, retain the customer's ordinary/off
+capture policy and the source of that directive. Established ordinary authority
+permits small source-linked captures at natural transitions without per-event
+questions. A current no-retention direction suppresses capture. The receipt, not
+the instruction text, establishes that an occurrence was saved.
 
-Package validation does not prove Codex discovery, model behavior, background scheduling, or filesystem authority on another machine. Record the installed paths and run a fresh-task resumption case after installation.
+Codex tool approval, filesystem access, scheduling and external-action authority
+remain host controls. Package validation does not prove discovery, a fresh task's
+behavior, background invocation or another machine's persistent-store health.
+Verify those through the installed edition's bounded first-run workflow.

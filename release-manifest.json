@@ -1,13 +1,13 @@
 {
   "format": "cognitive-continuity-standalone-release/v1",
   "name": "cognitive-continuity",
-  "version": "0.2.5",
-  "release_status": "canonical_successor_repository_source_checkpoint",
+  "version": "0.3.0",
+  "release_status": "canonical_component_source_for_edition_adoption",
   "custody_status": "canonical_standalone_successor_with_integrated_lineage_base",
   "canonical_authority": {
     "repository": "https://github.com/Stunspot/cognitive-continuity",
     "release_line": "standalone",
-    "version": "0.2.5"
+    "version": "0.3.0"
   },
   "lineage_base": {
     "repository": "https://github.com/Stunspot/nova-the-optimal-ai-mind",
@@ -28,20 +28,39 @@
   ],
   "canonical_successor_changed_paths": [
     ".github/workflows/runtime-tests.yml",
-    "docs/index.html",
-    "docs/README.md",
-    "scripts/workspace_runtime.py",
-    "scripts/continuity_store_v2.py",
-    "scripts/compile_context_v2.py",
-    "scripts/error_neighborhood.py",
-    "assets/schemas/lifecycle-receipt-v1.schema.json",
-    "scripts/tests/test_continuity_v2.py",
-    "scripts/tests/test_workspace_portability.py",
-    "scripts/README.md",
-    "references/portability-and-degraded-operation.md",
     "README.md",
     "RELEASE-NOTES.md",
-    "release-manifest.json"
+    "SKILL.md",
+    "adapters/claude-code.md",
+    "adapters/codex.md",
+    "agents/openai.yaml",
+    "assets/schemas/episode-v2.schema.json",
+    "assets/schemas/export-v2.schema.json",
+    "assets/schemas/lifecycle-receipt-v1.schema.json",
+    "assets/schemas/worldline-capture-v2.schema.json",
+    "assets/schemas/worldline-event-v2.schema.json",
+    "assets/schemas/worldline-policy-request-v1.schema.json",
+    "assets/schemas/worldline-policy-v1.schema.json",
+    "assets/schemas/worldline-request-v2.schema.json",
+    "assets/schemas/worldline-view-v2.schema.json",
+    "docs/README.md",
+    "docs/index.html",
+    "references/portability-and-degraded-operation.md",
+    "references/worldline-contract.md",
+    "references/worldline-timeline.md",
+    "release-manifest.json",
+    "scripts/README.md",
+    "scripts/compile_context_v2.py",
+    "scripts/continuity_store_v2.py",
+    "scripts/error_neighborhood.py",
+    "scripts/tests/test_continuity_v2.py",
+    "scripts/tests/test_workspace_portability.py",
+    "scripts/tests/test_worldline_events.py",
+    "scripts/tests/test_worldline_timeline.py",
+    "scripts/validate_continuity_v2.py",
+    "scripts/workspace_runtime.py",
+    "scripts/worldline_domain.py",
+    "scripts/worldline_timeline.py"
   ],
   "standalone_custody": [
     ".git/",
@@ -67,23 +86,33 @@
     "external_publication": "absent_only_exact_snapshot_and_recovery_evidence_retained_on_uncertainty",
     "lifecycle_interruption": "direct_object_identity_immutable_phases_and_human_disposition_no_external_phase_auto_resume",
     "lexical_identity": "unresolved_path_reparse_and_symlink_witness_preserved_before_mutation",
-    "worldline": "read_only_view_no_canonical_writes",
-    "worldline_project_scope": "caller_precedence_and_specific_project_global_operative_isolation",
+    "worldline": "autobiographical_occurrence_views_and_delegated_governed_capture_in_existing_episode_ledger",
+    "worldline_project_scope": "legacy_v1_caller_precedence_and_specific_project_global_operative_isolation_preserved",
     "faultline": "bounded_v2_error_neighborhood_no_control_authority",
     "recovery": "human_authority_v2_reconcile_v1_guidance_only",
     "v1": "read_only_compatibility_copy_migration_required_for_mutation",
     "migration_temporal_normalization": "legacy_full_date_to_equivalent_utc_midnight_with_count_and_digest",
     "guarded_nova_successor": "active_source_exact_sibling_hash_bound_selector_neutral",
-    "legacy_oversize_content": "lossless_bounded_migration_only_generation_and_receipt_bound"
+    "legacy_oversize_content": "lossless_bounded_migration_only_generation_and_receipt_bound",
+    "worldline_timeline_scope": "exact_user_agent_identity_optional_project_thread_facets_owner_first_counts",
+    "worldline_capture_control": "standing_ordinary_or_off_committed_ledger_order_lock_recheck_current_no_retention_guard",
+    "worldline_time": "occurrence_and_recorded_time_distinct_legacy_recorded_basis_execution_time_retention",
+    "worldline_correction": "stable_event_identity_linear_explicit_revision_inherited_privacy_current_envelope_before_as_of",
+    "worldline_forgetting": "exact_revision_and_policy_history_closure_associations_severed_neighbors_retained_current_generated_html_backup_and_governed_delete_before_commit",
+    "worldline_transfer": "safe_native_links_preserved_explicit_timeline_export_excludes_controls_and_denied_required_ancestry_import_quarantine_only",
+    "worldline_render": "explicit_absent_output_bounded_html_no_server_or_implicit_canonical_write",
+    "worldline_forward_reader": "native_event_and_policy_metadata_requires_0_3_0_capable_reader",
+    "worldline_capture_invocation": "natural_episode_habit_observed_receipts_no_background_daemon_or_automatic_transcript_backfill"
   },
   "consumer_adoption": {
-    "free_nova_2_1_3": "not_adopted_separate_governed_action_required",
+    "free_nova_3_2_0": "targeted_current_edition_adoption_evidence_owned_by_consumer",
+    "nova_emergent_1_1_0": "targeted_current_edition_adoption_evidence_owned_by_consumer",
     "other_consumers": "not_established_by_component_checkpoint"
   },
   "publication": {
-    "source_repository_synchronized": true,
     "github_release_published": false,
     "packaged_distribution_published": false,
-    "installed": false
+    "installed": false,
+    "source_repository_parity": "recorded_by_exact_commit_delivery_receipt"
   }
 }

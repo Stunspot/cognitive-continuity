@@ -1,3 +1,35 @@
+# Cognitive Continuity 0.3.0
+
+Worldline becomes Nova's autobiographical timeline over the existing episode
+ledger: compact recognition, honest occurrence and recording time, source links,
+and optional projects, conversations, kinds and topics. Existing retained episodes
+remain visible as sourced legacy entries. The new `worldline_timeline.py` provides
+browse, overview, inspect and an explicitly requested bounded HTML projection.
+
+Capture and persistent ordinary/off controls delegate to the governed transaction
+engine. Routine capture requires standing ordinary authority, rechecked under the
+lock; current no-retention instructions suppress capture. Stable source-event keys
+make retries idempotent. Corrections preserve logical identity and inherited
+privacy, while retractions remain explicit. Forgetting expands correction families
+and severs associations without deleting independent neighbors. Current unedited
+generated HTML views join the authenticated backup and are deleted through the
+existing lifecycle adapter before successful forget; edited derivatives retain
+their named-custody boundary. Policy-history
+forgetting cannot revive an earlier grant.
+
+Native metadata and safe locators survive permitted exports. Explicit timeline
+export selects owner-scoped history and omits policy controls and revision families
+whose required ancestors cannot be disclosed. Import remains quarantine-only.
+The old project `worldline.py` v1 API and generic Continuity operations remain.
+Native metadata requires a 0.3.0-capable reader; old-reader rollback needs a preserved
+pre-event workspace copy or a retained new reader, not an in-place downgrade.
+
+This is canonical component source for the Free Nova 3.2.0 and Nova Emergent 1.1.0
+adoptions. Their package, installation and invocation evidence belongs to the
+edition delivery. No new standalone package, transcript backfill, background daemon
+or guaranteed future host invocation is claimed here. Preceding release notes
+retain their historical evidence scope.
+
 # Cognitive Continuity 0.2.5
 
 This patch makes the catalog routing cue concise and consistent with its agent metadata. The runtime reports the new implementation version; storage formats, authorization, algorithms, Worldline, and Faultline behavior are unchanged. This remains a canonical source checkpoint, with no standalone packaged distribution or GitHub Release.
